@@ -33,7 +33,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterator
 
+import base64
+
 import pdfplumber
+from anthropic import Anthropic
 from dotenv import load_dotenv
 from supabase import Client, create_client
 from tqdm import tqdm
@@ -110,6 +113,67 @@ def extract_text(pdf_path: Path) -> str:
     return "\n".join(pages)
 
 
+# Claude Sonnet 4.6 is vision-capable, accepts PDF documents natively (server
+# rasterizes), and balances quality/cost well for OCR-style transcription.
+OCR_MODEL = "claude-sonnet-4-6"
+OCR_PROMPT = (
+    "Tu es un OCR pour documents juridiques français.\n\n"
+    "Transcris ce document mot pour mot, en préservant fidèlement :\n"
+    "- les en-têtes hiérarchiques (TITRE I, CHAPITRE II, SECTION 1, etc.)\n"
+    "- les numéros d'articles (Article 5, Art. 12.3, etc.) sur leur propre ligne\n"
+    "- la ponctuation et les paragraphes\n\n"
+    "N'ajoute aucun commentaire, aucune introduction. Sortie : uniquement le texte transcrit."
+)
+
+
+def extract_text_via_vision(pdf_path: Path) -> str:
+    """Send the entire PDF to Claude for transcription. Used for scanned PDFs
+    where pdfplumber returns nothing.
+
+    Result is cached in scripts/cache/<stem>.ocr.txt so re-runs (e.g. while
+    tuning chunking) don't pay for OCR again. Delete the cache file to force.
+    """
+    cache_dir = Path(__file__).parent / "cache"
+    cache_dir.mkdir(exist_ok=True)
+    cache_path = cache_dir / f"{pdf_path.stem}.ocr.txt"
+    if cache_path.exists():
+        print(f"Using cached OCR: {cache_path.name}")
+        return cache_path.read_text(encoding="utf-8")
+
+    client = Anthropic()
+    with pdf_path.open("rb") as f:
+        pdf_b64 = base64.standard_b64encode(f.read()).decode("ascii")
+
+    print("Transcribing via Claude vision…")
+    msg = client.messages.create(
+        model=OCR_MODEL,
+        max_tokens=8192,
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "document",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "application/pdf",
+                            "data": pdf_b64,
+                        },
+                    },
+                    {"type": "text", "text": OCR_PROMPT},
+                ],
+            }
+        ],
+    )
+    parts = [b.text for b in msg.content if getattr(b, "type", None) == "text"]
+    text = "\n".join(parts)
+    print(
+        f"  → {msg.usage.input_tokens} input + {msg.usage.output_tokens} output tokens"
+    )
+    cache_path.write_text(text, encoding="utf-8")
+    return text
+
+
 # Recurring page-header/footer noise injected by this PDF on every page.
 # Stripped at normalize time so it doesn't pollute chunks or section labels.
 NOISE_PATTERNS = [
@@ -130,6 +194,12 @@ def normalize_whitespace(text: str) -> str:
     out_lines: list[str] = []
     for ln in text.splitlines():
         ln = re.sub(r"[ \t]+", " ", ln).strip()
+        # Strip markdown-bold/italic delimiters that Claude vision emits
+        # around headings (e.g. "**Article 1 :**" → "Article 1 :"). Done
+        # before regex matching so heading detection still works.
+        ln = re.sub(r"\*\*([^*]+)\*\*", r"\1", ln)
+        ln = re.sub(r"(?<!\*)\*([^*\n]+)\*(?!\*)", r"\1", ln)
+        ln = ln.strip()
         if not ln:
             continue
         # Drop noise patterns inline. After stripping, the line may become
@@ -437,6 +507,11 @@ def parse_args() -> argparse.Namespace:
         "match. Use to cut a PDF where multiple documents are glued together "
         "(e.g. --stop-at='CONVENTION COLLECTIVE INTERPROFESSIONNELLE').",
     )
+    p.add_argument(
+        "--ocr",
+        action="store_true",
+        help="Transcribe via Claude vision instead of pdfplumber. Use for scanned PDFs.",
+    )
     p.add_argument("--dry-run", action="store_true", help="Parse and chunk but do not write to DB or upload.")
     return p.parse_args()
 
@@ -458,7 +533,10 @@ def main() -> int:
         return 1
 
     print(f"Parsing {args.pdf.name}…")
-    raw = extract_text(args.pdf)
+    if args.ocr:
+        raw = extract_text_via_vision(args.pdf)
+    else:
+        raw = extract_text(args.pdf)
     text = normalize_whitespace(raw)
     print(f"  → {len(text):,} characters of text after normalization")
 
