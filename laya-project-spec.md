@@ -9,14 +9,12 @@
 
 **Decision: GO.** Branding locked, all architectural decisions locked. Coding starts week of 2026-05-25 — or sooner if Hussein gives the green light.
 
-### Awaiting Hussein's call (next session pickup point)
+### Pickup-point questions — resolved 2026-05-22
 
-Two small inputs needed before week 1 scaffolding can fire:
+1. **GitHub repo** — `xkodit/Laya` (private). Pushed initial commit `a1be10d` (spec + branding + env template).
+2. **Supabase region** — `eu-west-1` (Ireland). Project ref `oyfxljzdjyebescnouvo`. Slightly farther than the original Paris recommendation; latency cost accepted for region maturity.
 
-1. **GitHub repo strategy** — create `xkodit/Laya` and push as we go, or local-only until later?
-2. **Supabase region** — recommendation is `eu-west-3` (Paris, ~80–110 ms to Abidjan); confirm or pick another.
-
-Once those are answered, week 1 begins: Next.js + Supabase scaffolding, brand-aware Tailwind config, Plus Jakarta Sans, schema migrations, RLS, email+password auth, allowlist middleware, admin route gate, three logos dropped into `/public/`.
+Week 1 scaffolding fires immediately: Next.js + Supabase, brand-aware Tailwind, Plus Jakarta Sans, schema migrations, RLS, email+password auth, allowlist middleware, admin route gate, three logos in `/public/`.
 
 ### Open non-code actions (Hussein owns — see §12 for detail)
 
