@@ -9,6 +9,26 @@ create table profiles (
   created_at timestamptz default now()
 );
 
+-- is_admin() helper for RLS bypass on moderation tables.
+-- SECURITY DEFINER lets it read profiles.role without tripping its own RLS.
+-- Defined here (not in 0001) because the SQL body validates against profiles
+-- at function-creation time.
+create or replace function public.is_admin()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select coalesce(
+    (select role = 'admin' from public.profiles where id = auth.uid()),
+    false
+  );
+$$;
+
+revoke all on function public.is_admin() from public;
+grant execute on function public.is_admin() to authenticated;
+
 alter table profiles enable row level security;
 
 create policy "profiles_select_own"
