@@ -23,7 +23,7 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env
+# env (keep .env.example tracked)
 .env
 .env*.local
 .env.development
@@ -57,5 +57,6 @@ venv/
 /scripts/cache/
 
 # misc
+*.pem
 .env.local.backup
 *.log
