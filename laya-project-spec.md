@@ -5,16 +5,63 @@
 
 ---
 
-## 0. Status (as of 2026-05-21)
+## 0. Status (as of 2026-05-23)
 
-**Decision: GO.** Branding locked, all architectural decisions locked. Coding starts week of 2026-05-25 — or sooner if Hussein gives the green light.
+**Decision: GO.** Branding locked, all architectural decisions locked. Coding underway since 2026-05-22.
 
 ### Pickup-point questions — resolved 2026-05-22
 
 1. **GitHub repo** — `xkodit/Laya` (private). Pushed initial commit `a1be10d` (spec + branding + env template).
 2. **Supabase region** — `eu-west-1` (Ireland). Project ref `oyfxljzdjyebescnouvo`. Slightly farther than the original Paris recommendation; latency cost accepted for region maturity.
 
-Week 1 scaffolding fires immediately: Next.js + Supabase, brand-aware Tailwind, Plus Jakarta Sans, schema migrations, RLS, email+password auth, allowlist middleware, admin route gate, three logos in `/public/`.
+### Phase A progress (week-by-week against §11)
+
+- [x] **Week 1–2: Foundation** — Next.js 16 + Tailwind v4 + Plus Jakarta Sans + brand tokens; Supabase SSR + email/password auth; closed-beta allowlist; admin gate; `profiles` + `conversations` + `messages` + `documents` + `document_chunks` + `subscriptions` + `usage_events` + `contract_templates` + `beta_requests` schema with RLS; `admin_user_activity` RPC; `documents` status CHECK.
+- [x] **Week 2–3: Local Python ingestion** — `scripts/ingest.py` with article-aware chunking, Voyage `voyage-3` embeddings, Claude vision OCR fallback for scanned PDFs, corpus storage bucket. `--from-pending` mode drains admin-uploaded documents. Two launch PDFs ingested. `match_chunks` RPC + smoke-test script proves vector retrieval returns sane results.
+- [x] **Profile + admin moderation** (week 6–7 work pulled forward) — `/profile` page with edit, change-password, account delete; admin views for documents, users, conversations, feedback.
+- [x] **Week 3–5: Streaming chat with tool-calling agent** — done in v1 form (commit `cc0402e`). See *Chat implementation snapshot* below for what's in and what's deferred.
+- [ ] **Week 5–6: Eval set (50 Q&A) + runner** — not started. Next milestone.
+- [ ] **Week 6–7: Conversation CRUD (favorite, delete, copy, PDF) + sliding-window summarization** — partial (basic persistence + sidebar exist; favorite/delete/PDF/summarize not built).
+- [ ] **Week 7–8: Thumbs/report + red-team prompt tuning** — not started (feedback tables + admin viewer exist; in-chat UI doesn't).
+- [ ] **Week 8+: Open closed beta** — gated on the above.
+
+### Chat implementation snapshot (commit `cc0402e`, 2026-05-23)
+
+**Stack chosen**
+
+- **AI SDK**: `ai@^6.0.191` + `@ai-sdk/anthropic@^3.0.79` + `@ai-sdk/react@^3.0.193`. Direct provider package (not the Vercel AI Gateway) — preserves the door for native Anthropic Citations API later without a hop.
+- **Model**: `claude-sonnet-4-6` via `anthropic('claude-sonnet-4-6')`.
+- **Retrieval**: direct Voyage REST API (no SDK). The `voyageai` SDK's ESM build has unresolvable directory imports that Turbopack rejects and that `serverExternalPackages` couldn't rescue. `lib/chat/retrieval.ts` hits `/v1/embeddings` and `/v1/rerank` directly with `fetch`.
+
+**Architecture**
+
+- `POST /api/chat` accepts `{ id, message }` (last-message-only transport via `prepareSendMessagesRequest`); loads prior `messages` rows; runs `streamText` with `stopWhen: stepCountIs(8)`; `consumeStream()` so persistence runs even if the client disconnects.
+- Single tool `search_labor_code(query)` — calls `lib/chat/retrieval.ts` → Voyage `voyage-3` query embed → `match_chunks` RPC (top 20 candidates) → Voyage `rerank-2.5` (top 6) → returns chunks shaped for the model with short field names (`id, article, section, doc, primary, content`).
+- System prompt (`lib/chat/system-prompt.ts`) hard-codes: persona, four-lane fallback, strict bracket-only cite format, and an explicit `[INFO]` token marker for the general-knowledge lane (replaces the original `ℹ️` prefix because it's easier to detect deterministically client-side).
+- Persistence: AI SDK message IDs aren't uuids, so the route lets Postgres assign `messages.id` and persists only the suffix `messages.slice(priorCount)`. Tool chunks are deduped and written to `messages.citations` jsonb on the assistant row; tool parts also captured in `messages.tool_calls`. `conversations.updated_at` is bumped so the sidebar reorders.
+
+**UI**
+
+- `/chat` → generates a uuid and redirects to `/chat/[id]`. The conversation row isn't created in the DB until the first message arrives (the API upserts on POST).
+- `/chat/[id]` server-loads conversation + messages + flattened citations and hands them to the `<Chat>` client component.
+- `<Chat>` uses `useChat` with `id: conversationId, messages: initialMessages`; merges DB-loaded chunks with chunks streaming in from live tool parts into a single pool keyed by `chunk.id`.
+- Inline citation badges render via `components/chat/answer-renderer.tsx` (regex tokenizer over the streamed text — partial brackets stay as plain text until the closing bracket arrives). Match is by normalized `article_ref` against the chunk pool, with a substring fallback. Unmatched brackets render as a dim non-interactive badge.
+- Side panel is the shadcn `Sheet` (right-anchored, 420px). Doc reference + indigo article-ref headline + parent section + cited content with a gold left-border anchor.
+- "Info générale, non sourcée" pill is rendered when the tokenizer sees the `[INFO]` token.
+- `/` redirects signed-in users to `/chat`. `AppHeader` (non-chat pages) gained a Conversations link.
+
+**Known deferred work in chat**
+
+1. **Native Anthropic Citations API** — currently bracket-pattern (model emits `[Art. X.Y]`, system prompt instructs strict-only-from-tool-results, but no enforcement). The AI SDK v6 tool-result content-parts API doesn't expose Anthropic's `document` block with `citations.enabled`, so enforcement requires bypassing the tool abstraction (manual document injection on user turns), which conflicts with spec §7.2 multi-pass search. **Plan**: keep bracket pattern for closed beta; revisit with native enforcement once we have eval-set evidence of fabricated cites.
+2. **Sliding-window summarization** (spec §7.4) — schema field `conversations.summary` exists but no summarizer job written.
+3. **Conversation CRUD beyond list/create** — no favorite toggle, no delete, no rename, no copy-to-clipboard, no PDF download.
+4. **Thumbs-up/down + report** — schema and admin viewer exist; in-chat UI doesn't.
+5. **Auto-resize textarea** on the input box — currently single-row textarea with shift+enter newline.
+
+**Files touched in commit `cc0402e`**
+
+- New: `app/api/chat/route.ts`, `app/chat/page.tsx`, `app/chat/layout.tsx`, `app/chat/[id]/page.tsx`, `components/chat/{chat,citation,answer-renderer,sidebar}.tsx`, `components/ui/sheet.tsx`, `lib/chat/{system-prompt,retrieval}.ts`.
+- Modified: `app/page.tsx` (signed-in redirect to /chat), `components/app/app-header.tsx` (Conversations link), `package.json` + `pnpm-lock.yaml` + `pnpm-workspace.yaml` (AI SDK + Anthropic + React + zod deps; pnpm `minimumReleaseAgeExclude` entries for the v6 packages).
 
 ### Open non-code actions (Hussein owns — see §12 for detail)
 
@@ -26,6 +73,10 @@ Week 1 scaffolding fires immediately: Next.js + Supabase, brand-aware Tailwind, 
 - [ ] **Legal corpus expansion** (CCI 1977, sector conventions, jurisprudence) — ongoing post-launch
 
 Update this list as items close. The list is the source of truth — when every box is checked, Phase B is unblocked.
+
+### How to resume work in a new session
+
+Read this file first, then `git log --oneline -20` for the latest commits. The chat is live at `/chat` (run `npm run dev` or `pnpm dev`). Suggested next slice: **eval set construction (week 5–6)** OR **conversation CRUD polish (favorite/delete/rename/PDF/summarize)**, depending on which de-risks more of the closed-beta launch. The bracket→native-citations migration is non-urgent and deferred until eval data justifies the work.
 
 ---
 
