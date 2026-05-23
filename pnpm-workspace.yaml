@@ -3,3 +3,8 @@ allowBuilds:
   msw: true
   sharp: true
   unrs-resolver: true
+minimumReleaseAgeExclude:
+  - '@ai-sdk/anthropic@3.0.79'
+  - '@ai-sdk/gateway@3.0.120'
+  - '@ai-sdk/react@3.0.193'
+  - ai@6.0.191

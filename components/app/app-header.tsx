@@ -1,6 +1,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import { redirect } from "next/navigation";
+import { MessageSquare } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { UserMenu } from "./user-menu";
 
@@ -40,11 +41,20 @@ export async function AppHeader() {
         <span className="text-sm font-semibold tracking-tight">Laya</span>
       </Link>
 
-      <UserMenu
-        fullName={profile.full_name}
-        email={profile.email}
-        isAdmin={profile.role === "admin"}
-      />
+      <div className="flex items-center gap-2">
+        <Link
+          href="/chat"
+          className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm font-medium text-foreground/80 transition hover:bg-accent hover:text-foreground"
+        >
+          <MessageSquare className="size-4" />
+          Conversations
+        </Link>
+        <UserMenu
+          fullName={profile.full_name}
+          email={profile.email}
+          isAdmin={profile.role === "admin"}
+        />
+      </div>
     </header>
   );
 }
