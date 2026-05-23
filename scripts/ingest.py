@@ -1,17 +1,27 @@
 """
 Ingest a French legal PDF into Laya's Supabase corpus.
 
-Usage:
-  python scripts/ingest.py \
-    --pdf "C:/path/to/code_du_travail.pdf" \
-    --title "Code du Travail — Loi n° 2015-532" \
-    --reference "Loi n° 2015-532" \
-    --source-type loi \
-    --source-authority primary \
-    --primary-source \
-    --effective-date 2015-07-20
+Two modes:
 
-Behaviour:
+  Single-PDF mode (manual, used by Hussein for the initial corpus):
+    python scripts/ingest.py \
+      --pdf "C:/path/to/code_du_travail.pdf" \
+      --title "Code du Travail — Loi n° 2015-532" \
+      --reference "Loi n° 2015-532" \
+      --source-type loi \
+      --source-authority primary \
+      --primary-source \
+      --effective-date 2015-07-20
+
+  Pending-queue mode (drains admin uploads from the web UI):
+    python scripts/ingest.py --from-pending
+
+In pending mode the script queries `documents WHERE status='pending'`, downloads
+each PDF from the `corpus` Storage bucket, parses + embeds + inserts chunks,
+then flips status to 'ready' (or 'failed' on error). Metadata was already set
+by the admin upload — the script just does the heavy lifting.
+
+Behaviour (single-PDF mode):
   1. Uploads the PDF to the `corpus` Storage bucket (key = slug of reference).
   2. Inserts a row into `documents` with status='processing'.
   3. Extracts text with pdfplumber, walks line-by-line tracking
@@ -34,6 +44,7 @@ from pathlib import Path
 from typing import Iterator
 
 import base64
+import tempfile
 
 import pdfplumber
 from anthropic import Anthropic
@@ -479,6 +490,109 @@ def mark_failed(supabase: Client, document_id: str) -> None:
     supabase.table("documents").update({"status": "failed"}).eq("id", document_id).execute()
 
 
+def mark_processing(supabase: Client, document_id: str) -> None:
+    supabase.table("documents").update({"status": "processing"}).eq("id", document_id).execute()
+
+
+def download_from_storage(supabase: Client, storage_path: str) -> Path:
+    """Pull a corpus PDF down to a temp file and return the local path."""
+    data = supabase.storage.from_("corpus").download(storage_path)
+    tmp = tempfile.NamedTemporaryFile(
+        prefix="laya-ingest-",
+        suffix=Path(storage_path).suffix or ".pdf",
+        delete=False,
+    )
+    try:
+        tmp.write(data)
+    finally:
+        tmp.close()
+    return Path(tmp.name)
+
+
+def process_one_pending(supabase: Client, doc: dict) -> bool:
+    """Parse, embed, and insert chunks for a single pending document row.
+    Returns True on success, False on failure (and marks the row 'failed')."""
+
+    doc_id = doc["id"]
+    title = doc["title"]
+    storage_path = doc["storage_path"]
+
+    print(f"\n→ {title}  ({doc.get('reference') or doc_id})")
+    print(f"  storage: corpus/{storage_path}")
+
+    mark_processing(supabase, doc_id)
+
+    local_path: Path | None = None
+    try:
+        local_path = download_from_storage(supabase, storage_path)
+        print(f"  downloaded → {local_path}")
+
+        raw = extract_text(local_path)
+        text = normalize_whitespace(raw)
+        print(f"  → {len(text):,} characters after normalization")
+
+        articles = list(iter_articles(text))
+        chunks = build_chunks(articles)
+        print(
+            f"  → {len(articles)} article segments → {len(chunks)} chunks"
+        )
+
+        if not chunks:
+            raise RuntimeError("no chunks produced")
+
+        # Wipe any existing chunks (handles re-process via admin UI).
+        supabase.table("document_chunks").delete().eq(
+            "document_id", doc_id
+        ).execute()
+
+        embed_chunks(chunks)
+        insert_chunks(supabase, doc_id, chunks)
+        mark_ready(supabase, doc_id)
+        print(f"  ✓ ready ({len(chunks)} chunks)")
+        return True
+
+    except Exception as exc:
+        mark_failed(supabase, doc_id)
+        print(f"  ✗ failed: {exc}", file=sys.stderr)
+        return False
+
+    finally:
+        if local_path and local_path.exists():
+            try:
+                local_path.unlink()
+            except OSError:
+                pass
+
+
+def process_pending_queue(supabase: Client) -> int:
+    """Drain all documents WHERE status='pending'. Returns process exit code."""
+    pending = (
+        supabase.table("documents")
+        .select("id, title, reference, storage_path")
+        .eq("status", "pending")
+        .order("created_at", desc=False)
+        .execute()
+    )
+    docs = pending.data or []
+
+    if not docs:
+        print("No documents with status='pending'. Nothing to do.")
+        return 0
+
+    print(f"Found {len(docs)} pending document(s).")
+
+    succeeded = 0
+    failed = 0
+    for doc in docs:
+        if process_one_pending(supabase, doc):
+            succeeded += 1
+        else:
+            failed += 1
+
+    print(f"\nDone. {succeeded} ready, {failed} failed.")
+    return 0 if failed == 0 else 1
+
+
 # ---------------------------------------------------------------------------
 # Entrypoint
 # ---------------------------------------------------------------------------
@@ -486,15 +600,20 @@ def mark_failed(supabase: Client, document_id: str) -> None:
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Ingest a legal PDF into Laya's corpus.")
-    p.add_argument("--pdf", required=True, type=Path, help="Path to the PDF file.")
-    p.add_argument("--title", required=True, help="Human title shown in citations.")
-    p.add_argument("--reference", required=True, help="Canonical reference (e.g. 'Loi n° 2015-532'). Used as upsert key.")
+    p.add_argument(
+        "--from-pending",
+        action="store_true",
+        help="Drain the queue of documents WHERE status='pending' (admin uploads). "
+        "All metadata flags below are ignored in this mode.",
+    )
+    p.add_argument("--pdf", type=Path, help="Path to the PDF file (single-PDF mode).")
+    p.add_argument("--title", help="Human title shown in citations.")
+    p.add_argument("--reference", help="Canonical reference (e.g. 'Loi n° 2015-532'). Used as upsert key.")
     p.add_argument(
         "--source-type",
-        required=True,
         choices=["loi", "decret", "convention", "arrete", "handbook", "doctrine"],
     )
-    p.add_argument("--source-authority", required=True, choices=["primary", "secondary"])
+    p.add_argument("--source-authority", choices=["primary", "secondary"])
     p.add_argument(
         "--primary-source",
         action="store_true",
@@ -527,6 +646,28 @@ def main() -> int:
     # Load env from .env.local
     repo_root = Path(__file__).resolve().parent.parent
     load_dotenv(repo_root / ".env.local")
+
+    if args.from_pending:
+        supabase = get_supabase()
+        return process_pending_queue(supabase)
+
+    # Single-PDF mode requires the metadata flags.
+    missing = [
+        flag for flag, value in (
+            ("--pdf", args.pdf),
+            ("--title", args.title),
+            ("--reference", args.reference),
+            ("--source-type", args.source_type),
+            ("--source-authority", args.source_authority),
+        ) if not value
+    ]
+    if missing:
+        print(
+            f"Missing required arg(s) for single-PDF mode: {', '.join(missing)}. "
+            f"Use --from-pending to drain admin uploads instead.",
+            file=sys.stderr,
+        )
+        return 1
 
     if not args.pdf.exists():
         print(f"PDF not found: {args.pdf}", file=sys.stderr)
