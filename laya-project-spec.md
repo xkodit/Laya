@@ -89,24 +89,23 @@ Three consistent patterns across both MAUVAIS rows and several OK-with-commentar
 2. ✅ **Round-2 packet sent to tester** — `eval/round-2-CDI-CDD.md`, 5 targeted questions all designed to flip verdict based on CDI vs CDD (pregnant CDD end-of-term, anticipated rupture, prime de précarité, 2-year cumulative cap, tacit CDD continuation). Tester only needs to answer "did Laya ask the contract type before answering? yes/no/partial" per question — informal WhatsApp response, no spreadsheet needed.
 3. ✅ **Runner hold-off documented** — `eval/README.md` codifies the ≥25-rows-from-2+-testers threshold.
 
-**Round-2 results — returned 2026-05-24, PASSED 5/5.** Tester sent transcripts (`round-2-CDI-CDD answers.docx` on Hussein's Desktop). Per-question verdict:
+**Round-2 results — 2026-05-24.** Hussein-only quick pass was misleading; Hadi's V&V verdict (the authoritative one) is **1/5 fully OK, 3/5 MAUVAIS, 1/5 OK-with-critique**. Per question:
 
-| # | Question | CDI/CDD asked first? | Notes |
+| # | Question | Hadi's verdict | What Laya should have done |
 |---|---|---|---|
-| 1 | Pregnant employee end-of-contract | ✅ | Also asked when pregnancy was disclosed |
-| 2 | Resignation, 8 months left | ✅ | Also asked about cadre status |
-| 3 | End-of-contract bonus | ✅ | Also asked ancienneté |
-| 4 | 7 renewals of 3-month CDD | Correctly skipped (contract type implicit) | Synthesized [Art. 15.4] + [Art. 15.6] + [Art. 15.1] cleanly, ended with the pivotal question |
-| 5 | Contract ended 2 weeks ago, still working | Correctly skipped (situation clear-cut) | Identified tacit CDI continuation, cited [Art. 7], asked the right follow-ups |
+| 51 | Pregnant employee end-of-contract | **MAUVAIS** | "fin de contrat" + "renouveler" already pin the contract as CDD. Don't ask CDI/CDD — state the assumption ("je pars du principe que c'est un CDD") and answer. Then call out the bad intent politely and reframe toward a lawful ground (e.g. ask about performance). |
+| 52 | Resignation, 8 months left | **MAUVAIS** | "8 mois restants" → CDD. State the assumption, then explain that you can't *démissionner avant le terme*; it's a *rupture anticipée* with financial consequences. |
+| 53 | End-of-contract bonus | **MAUVAIS** | "prime de fin de contrat" → CDD. State the assumption and answer with all assumptions made explicit. |
+| 54 | 7 renewals of 3-month CDD | **OK** | Asked good clarifying questions (poste / contrats / qui soulève le sujet). Note: 7th renewal is fine; 8th breaches the 24-month cumulative cap. |
+| 55 | Contract ended 2 weeks ago, still working | **OK with critique** | Asked CDI/CDD redundantly (Q1) — "contrat fini" already implies CDD. The other two follow-ups (contract copy + employer's signals) are correct. |
 
-Calibration is right: clarifies on individual-situation questions, doesn't over-clarify when the question is factual or self-contained. The `f976063` prompt tune is validated.
+**The pattern Hadi surfaced:** "clarify before verdict" is necessary but not sufficient — it must also be *non-redundant*. If the question's surface text already pins the variable, asking for it again makes Laya look mechanical and signals she's not reading carefully. New rule for the prompt: **infer signals → state assumption → ask only what's genuinely ambiguous**.
 
-**Q21 + Q23 manual retest — 2026-05-24, BOTH PASSED.** Transcripts archived on Hussein's Desktop (`TEST A - Q21 ANSWERS.docx` for Q21, in-chat text for Q23).
+**Second axis Hadi surfaced on Q51 (bad-intent / positive reframe):** when a question signals discriminatory intent toward a protected category (pregnancy, etc.), Laya should name the issue politely *and* actively offer a lawful reframe. Stronger than §6.4's current "add counterparty context" — closer to soft-refusal-with-pivot.
 
-- **Q21 (printing shop multi-turn):** turns 1 and 2 (factual pause questions) answered directly. Turn 3 (the trap — "imprimerie, on doit faire demi-journée 8-12h mais le patron nous fait venir 7-14h sans pause") triggered clarification before any verdict: asked CDI/CDD, asked whether the 7h-14h schedule is *contractual or oral*, asked the meaning of "demi-journée." Closed with *"Je veux pas te donner un verdict à côté de la réalité."* Bonus: vous→tu register mirroring also worked.
-- **Q23 (tap water):** asked the water source (SODECI vs puits/citerne/bidons) and explicitly explained the SODECI-is-potable-by-default principle. No premature "infraction" verdict; no premature Inspection du Travail recommendation.
+**Q21 + Q23 manual retest — 2026-05-24, Hussein-only pre-check.** Transcripts on Hussein's Desktop (`TEST A - Q21 ANSWERS.docx` for Q21, in-chat text for Q23). Both *appear* to pass — Laya asked the right clarifying questions before any verdict (contract type / schedule writing / "demi-journée" meaning for Q21; water source + SODECI principle for Q23). **Pending Hadi's V&V verdict on these** — given the round-2 miss above, Hussein-only passes are preliminary.
 
-Both round-1 MAUVAIS rows are now closed. The `f976063` prompt tune is fully validated across round-1 regressions AND round-2 fresh scenarios.
+**Status of the `f976063` prompt tune:** partially validated. The "clarify before verdict" axis works, but the prompt needs a follow-up edit to add the signal-inference rule + the bad-intent reframe behavior. Iteration on hold until Hadi returns his Q21/Q23 verdicts so all findings land in one prompt-edit cycle.
 
 ### Open non-code actions (Hussein owns — see §12 for detail)
 
@@ -125,9 +124,13 @@ Read this file first, then `git log --oneline -20` for the latest commits. The c
 
 **Most likely next slice (in order of priority):**
 
-1. **Recruit testers #2 and #3** for the eval set — the prompt tune is fully validated (round-1 MAUVAIS fixed + round-2 fresh scenarios 5/5). The bottleneck is now breadth: need ≥25 filled rows from 2+ testers to unblock the runner (per `eval/README.md`). Also covers the §12 "Beta tester pipeline" item.
-2. **Sliding-window summarization** (spec §7.4) — schema exists, summarizer job doesn't. Becomes visible as soon as testers run conversations past ~20 turns.
-3. **Closed-beta open** (week 8+) — once testers #2/#3 have run a full pass, expand allowlist per §13.
+1. **Wait for Hadi's Q21/Q23 verdicts**, then iterate the prompt once with all round-2 + round-1-retest findings folded in. Two rules to add to `lib/chat/system-prompt.ts`:
+   - **Signal inference** — if the question's surface text already pins down the variable (e.g. "fin de contrat" / "X mois restants" / "prime de fin" → CDD), state the assumption explicitly and proceed; don't ask a redundant question.
+   - **Bad-intent reframe** — when a question signals discriminatory intent toward a protected category (pregnancy, etc.), name the issue politely *and* offer a lawful pivot (e.g. ask about performance as a legitimate ground). Stronger than §6.4's bilateral-honesty default; closer to soft-refusal-with-pivot.
+2. **Re-run round-2 + Q21/Q23 against the new prompt**, send Hadi the new transcripts for V&V signoff before declaring anything closed.
+3. **Recruit testers #2 and #3** (5–7 names across personas) — once Hadi signs off, the bottleneck becomes breadth. Need ≥25 filled rows from 2+ testers to unblock the runner (per `eval/README.md`). Also covers the §12 "Beta tester pipeline" item.
+4. **Sliding-window summarization** (spec §7.4) — schema exists, summarizer job doesn't. Becomes visible as soon as testers run conversations past ~20 turns.
+5. **Closed-beta open** (week 8+) — once testers #2/#3 have run a full pass, expand allowlist per §13.
 
 The bracket→native-citations migration is non-urgent and deferred until eval data justifies the work.
 
