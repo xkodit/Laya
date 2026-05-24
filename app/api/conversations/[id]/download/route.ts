@@ -7,11 +7,14 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 function safeFilename(title: string): string {
-  // Strip filesystem-unsafe chars; keep accents (most browsers handle UTF-8
-  // filenames in Content-Disposition via filename* param).
+  // Content-Disposition headers are ByteStrings (Latin-1), so we must keep
+  // this ASCII. NFKD splits "é" into "e" + U+0301; stripping the combining
+  // range (and anything else outside printable ASCII) gives a clean fallback.
   return (
     title
       .normalize("NFKD")
+      .replace(/[̀-ͯ]/g, "")
+      .replace(/[^\x20-\x7e]/g, "")
       .replace(/[\/\\?%*:|"<>]/g, "")
       .replace(/\s+/g, "_")
       .slice(0, 80) || "conversation"

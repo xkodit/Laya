@@ -294,10 +294,9 @@ function ConversationItem({
             type="button"
             aria-label="Options de la conversation"
             className={cn(
-              "absolute top-1/2 right-1 grid size-7 -translate-y-1/2 place-items-center rounded-md text-muted-foreground transition hover:bg-background hover:text-foreground",
-              "opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100",
-              "data-[state=open]:opacity-100 data-[state=open]:bg-background data-[state=open]:text-foreground",
-              "max-md:opacity-100",
+              "absolute top-1/2 right-1 grid size-7 -translate-y-1/2 place-items-center rounded-md text-muted-foreground/70 transition hover:bg-background hover:text-foreground",
+              "group-hover/row:text-foreground",
+              "data-[state=open]:bg-background data-[state=open]:text-foreground",
             )}
             onClick={(e) => e.stopPropagation()}
           >
