@@ -33,6 +33,8 @@ export default async function ConversationsPage() {
     .order("updated_at", { ascending: false })
     .limit(200);
 
+  // PostgREST returns profiles as a single object (many-to-one onto unique PK).
+  // messages(count) is an aggregate and comes back as an array of one row.
   const rows = (data ?? []) as unknown as Array<{
     id: string;
     title: string | null;
@@ -41,7 +43,7 @@ export default async function ConversationsPage() {
     created_at: string;
     updated_at: string;
     user_id: string;
-    profiles: { full_name: string; email: string }[] | null;
+    profiles: { full_name: string; email: string } | null;
     messages: { count: number }[];
   }>;
 
@@ -84,7 +86,7 @@ export default async function ConversationsPage() {
             ) : (
               rows.map((c) => {
                 const msgCount = c.messages?.[0]?.count ?? 0;
-                const owner = c.profiles?.[0] ?? null;
+                const owner = c.profiles ?? null;
                 return (
                   <TableRow key={c.id}>
                     <TableCell className="max-w-xs">

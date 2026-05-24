@@ -42,6 +42,8 @@ export default async function FeedbackPage() {
     .order("created_at", { ascending: false })
     .limit(200);
 
+  // PostgREST returns embedded many-to-one relations as a single object (since
+  // user_id/message_id are FKs onto unique PKs), not an array.
   const rows = (data ?? []) as unknown as Array<{
     id: string;
     rating: string;
@@ -49,8 +51,8 @@ export default async function FeedbackPage() {
     created_at: string;
     user_id: string;
     message_id: string;
-    profiles: { full_name: string; email: string }[] | null;
-    messages: { content: string; conversation_id: string }[] | null;
+    profiles: { full_name: string; email: string } | null;
+    messages: { content: string; conversation_id: string } | null;
   }>;
 
   return (
@@ -96,8 +98,8 @@ export default async function FeedbackPage() {
                   label: f.rating,
                   variant: "outline" as const,
                 };
-                const msg = f.messages?.[0] ?? null;
-                const owner = f.profiles?.[0] ?? null;
+                const msg = f.messages ?? null;
+                const owner = f.profiles ?? null;
                 const convoId = msg?.conversation_id;
                 const preview = msg?.content?.slice(0, 140) ?? "—";
                 return (
