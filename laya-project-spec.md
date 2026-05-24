@@ -83,11 +83,16 @@ Three consistent patterns across both MAUVAIS rows and several OK-with-commentar
 - Q41 (fake injury for money): refusing fraud + pivoting to legitimate compensation routes. **Praised.**
 - Q22, Q31: asking targeted clarifying questions or honestly redirecting out-of-domain.
 
-**Actions to take next session, in order of impact:**
+**Actions taken (2026-05-24, commit `f976063`):**
 
-1. **System-prompt tuning** (`lib/chat/system-prompt.ts`) — add a "clarify before verdict" rule for case-specific questions. Inspection du Travail / lawsuit recommendations are last-resort, never first response. Re-test on Q21 + Q23 manually to confirm the fix.
-2. **Send tester 5 more targeted questions** focused on CDI vs CDD edge cases (the weakest spot).
-3. **Hold eval runner** until ≥25 filled rows from 2+ testers — quantitative pass-rate isn't meaningful at n=11, but the qualitative findings are already actionable.
+1. ✅ **System-prompt tuned** — `lib/chat/system-prompt.ts` got a new "Avant de donner un verdict juridique — clarifier le cas" section. Hard rule: distinguish factual questions (answer first, ask follow-up after) from individual-situation questions (clarify FIRST — contract type, ancienneté, category, exact facts, problem origin — before any legal verdict). CDI vs CDD called out as the most determinative factor. Inspection du Travail / mise en demeure / prud'hommes explicitly demoted to last-resort.
+2. ✅ **Round-2 packet sent to tester** — `eval/round-2-CDI-CDD.md`, 5 targeted questions all designed to flip verdict based on CDI vs CDD (pregnant CDD end-of-term, anticipated rupture, prime de précarité, 2-year cumulative cap, tacit CDD continuation). Tester only needs to answer "did Laya ask the contract type before answering? yes/no/partial" per question — informal WhatsApp response, no spreadsheet needed.
+3. ✅ **Runner hold-off documented** — `eval/README.md` codifies the ≥25-rows-from-2+-testers threshold.
+
+**Still pending:**
+
+- **Manual retest of Q21 + Q23 locally** to verify the prompt fix changed behavior before declaring the tuning done. If Laya still jumps to verdicts, iterate on the prompt and retest before round-2 results arrive from the tester.
+- **Round-2 results from tester** — once back, either confirm the fix passes and move on, or re-tune and re-test.
 
 ### Open non-code actions (Hussein owns — see §12 for detail)
 
@@ -106,10 +111,10 @@ Read this file first, then `git log --oneline -20` for the latest commits. The c
 
 **Most likely next slice (in order of priority):**
 
-1. **System-prompt tuning based on first-tester findings** — see *Eval set — first tester findings* above. Add "clarify before verdict" rule to `lib/chat/system-prompt.ts`, manually retest Q21 + Q23, target the CDI/CDD clarification gap.
+1. **Manually retest Q21 + Q23 against the tuned prompt** — these are the two MAUVAIS rows from the first tester. Q21 = printing shop "demi-journée 8-12h actually 7-14h no break", Q23 = "patron makes us drink tap water". Open `/chat`, paste each verbatim, look for clarification questions (contract type, hours, water source) BEFORE any verdict. If Laya still jumps to "c'est illégal" without asking → iterate on `lib/chat/system-prompt.ts` and re-test. If both pass → ping the tester to run the round-2 packet (`eval/round-2-CDI-CDD.md`) and confirm CDI/CDD asking works there too.
 2. **Conversation CRUD polish** (favorite/delete/rename/copy/PDF) — week 6–7 work, more visible quality lift, helps testers during chat sessions.
 3. **Sliding-window summarization** (spec §7.4) — schema exists, summarizer job doesn't.
-4. **Send tester 5 more targeted questions** about CDI/CDD ambiguity to fill the gap his first batch exposed.
+4. **Wait for the tester's round-2 reply** before sending more questions or building the runner. The 11 rows already exposed the highest-leverage fix; more rows now would be diminishing returns until we know if the fix landed.
 
 The bracket→native-citations migration is non-urgent and deferred until eval data justifies the work.
 
