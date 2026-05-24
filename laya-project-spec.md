@@ -5,7 +5,7 @@
 
 ---
 
-## 0. Status (as of 2026-05-23)
+## 0. Status (as of 2026-05-24)
 
 **Decision: GO.** Branding locked, all architectural decisions locked. Coding underway since 2026-05-22.
 
@@ -20,9 +20,9 @@
 - [x] **Week 2–3: Local Python ingestion** — `scripts/ingest.py` with article-aware chunking, Voyage `voyage-3` embeddings, Claude vision OCR fallback for scanned PDFs, corpus storage bucket. `--from-pending` mode drains admin-uploaded documents. Two launch PDFs ingested. `match_chunks` RPC + smoke-test script proves vector retrieval returns sane results.
 - [x] **Profile + admin moderation** (week 6–7 work pulled forward) — `/profile` page with edit, change-password, account delete; admin views for documents, users, conversations, feedback.
 - [x] **Week 3–5: Streaming chat with tool-calling agent** — done in v1 form (commit `cc0402e`). See *Chat implementation snapshot* below for what's in and what's deferred.
-- [ ] **Week 5–6: Eval set (50 Q&A) + runner** — not started. Next milestone.
+- [~] **Week 5–6: Eval set (50 Q&A) + runner** — brief + template shipped (commit `ce18cd4`). First tester (admin@kodit.ai friend) returned **11/50 filled** on 2026-05-24 — see *Eval set — first tester findings* below. Runner deferred until ≥25 filled rows.
 - [ ] **Week 6–7: Conversation CRUD (favorite, delete, copy, PDF) + sliding-window summarization** — partial (basic persistence + sidebar exist; favorite/delete/PDF/summarize not built).
-- [ ] **Week 7–8: Thumbs/report + red-team prompt tuning** — not started (feedback tables + admin viewer exist; in-chat UI doesn't).
+- [x] **Week 7–8: In-chat thumbs/report** — shipped 2026-05-24 (commit `7cc36fa`). Red-team prompt tuning not started.
 - [ ] **Week 8+: Open closed beta** — gated on the above.
 
 ### Chat implementation snapshot (commit `cc0402e`, 2026-05-23)
@@ -55,13 +55,39 @@
 1. **Native Anthropic Citations API** — currently bracket-pattern (model emits `[Art. X.Y]`, system prompt instructs strict-only-from-tool-results, but no enforcement). The AI SDK v6 tool-result content-parts API doesn't expose Anthropic's `document` block with `citations.enabled`, so enforcement requires bypassing the tool abstraction (manual document injection on user turns), which conflicts with spec §7.2 multi-pass search. **Plan**: keep bracket pattern for closed beta; revisit with native enforcement once we have eval-set evidence of fabricated cites.
 2. **Sliding-window summarization** (spec §7.4) — schema field `conversations.summary` exists but no summarizer job written.
 3. **Conversation CRUD beyond list/create** — no favorite toggle, no delete, no rename, no copy-to-clipboard, no PDF download.
-4. **Thumbs-up/down + report** — schema and admin viewer exist; in-chat UI doesn't.
+4. **Thumbs-up/down + report** — ~~schema and admin viewer exist; in-chat UI doesn't.~~ **Done 2026-05-24** (commit `7cc36fa`). Per-message 👍/👎/🚩 with comment dialog; server action `app/chat/feedback-actions.ts` resolves the target by `(conversationId, messageIndex)` because freshly-streamed assistant messages have AI-SDK ids that don't match the DB uuid, and retries briefly to cover the race between stream completion and the chat route's `onFinish` insert. Migration `0012` adds partial unique indexes on `(message_id, user_id) WHERE rating IN ('up','down')` and `WHERE rating='report'` so rating + report can coexist but only one of each per user. Admin filter pills (Tous/👍/👎/🚩) shipped same day (commit `706af93`); admin join fix `87519a6` fixed `f.profiles?.[0]` reading undefined on many-to-one embedded selects.
 5. **Auto-resize textarea** on the input box — currently single-row textarea with shift+enter newline.
 
 **Files touched in commit `cc0402e`**
 
 - New: `app/api/chat/route.ts`, `app/chat/page.tsx`, `app/chat/layout.tsx`, `app/chat/[id]/page.tsx`, `components/chat/{chat,citation,answer-renderer,sidebar}.tsx`, `components/ui/sheet.tsx`, `lib/chat/{system-prompt,retrieval}.ts`.
 - Modified: `app/page.tsx` (signed-in redirect to /chat), `components/app/app-header.tsx` (Conversations link), `package.json` + `pnpm-lock.yaml` + `pnpm-workspace.yaml` (AI SDK + Anthropic + React + zod deps; pnpm `minimumReleaseAgeExclude` entries for the v6 packages).
+
+### Eval set — first tester findings (2026-05-24)
+
+First beta tester (admin@kodit.ai) returned **11/50 questions filled** across all 5 categories. Verdicts: 9 OK, 2 MAUVAIS. Raw CSV archived at `eval/filled/admin-kodit-2026-05-24.csv`. The tester added a `commentary` column not in the template — keep it for future testers, it's more useful than the binary `friend_verdict` alone.
+
+Three consistent patterns across both MAUVAIS rows and several OK-with-commentary rows:
+
+**Pattern 1 — Laya jumps to legal verdicts without clarifying the case.**
+- Q21 (printing shop, 7h work no break, MAUVAIS): declared "doublement illégal" and computed overtime — but assumed "demi-journée = 4h" when in CI it's traditional practice not legally fixed. Should have asked about contract hours first.
+- Q23 (no potable water, MAUVAIS): recommended Inspection du Travail immediately. Tester's point: should have asked "what's the water source? If it's SODECI tap water, it IS potable" — no violation at all.
+
+**Pattern 2 — Should always ask about contract type (CDI/CDD) for case-specific questions.**
+- Q2 (préavis cadre): tester wanted CDI/CDD clarification before answer.
+- Q42 (firing pregnant secretary): same answer is illegal advice for CDI, legal for CDD. Laya did eventually ask, but only after giving a generic answer first.
+
+**Pattern 3 — What's working (don't regress).**
+- Q11: synthesizing multiple articles instead of cherry-picking one. **Praised.**
+- Q32 (stolen truck): asking "is this a work vehicle or personal?" before answering. **Praised.**
+- Q41 (fake injury for money): refusing fraud + pivoting to legitimate compensation routes. **Praised.**
+- Q22, Q31: asking targeted clarifying questions or honestly redirecting out-of-domain.
+
+**Actions to take next session, in order of impact:**
+
+1. **System-prompt tuning** (`lib/chat/system-prompt.ts`) — add a "clarify before verdict" rule for case-specific questions. Inspection du Travail / lawsuit recommendations are last-resort, never first response. Re-test on Q21 + Q23 manually to confirm the fix.
+2. **Send tester 5 more targeted questions** focused on CDI vs CDD edge cases (the weakest spot).
+3. **Hold eval runner** until ≥25 filled rows from 2+ testers — quantitative pass-rate isn't meaningful at n=11, but the qualitative findings are already actionable.
 
 ### Open non-code actions (Hussein owns — see §12 for detail)
 
@@ -76,7 +102,22 @@ Update this list as items close. The list is the source of truth — when every 
 
 ### How to resume work in a new session
 
-Read this file first, then `git log --oneline -20` for the latest commits. The chat is live at `/chat` (run `npm run dev` or `pnpm dev`). Suggested next slice: **eval set construction (week 5–6)** OR **conversation CRUD polish (favorite/delete/rename/PDF/summarize)**, depending on which de-risks more of the closed-beta launch. The bracket→native-citations migration is non-urgent and deferred until eval data justifies the work.
+Read this file first, then `git log --oneline -20` for the latest commits. The chat is live at `/chat` (run `npx next dev` — `pnpm dev` may prompt to purge `node_modules` and hang on the non-TTY shell; if so, set `$env:CI="true"` first).
+
+**Most likely next slice (in order of priority):**
+
+1. **System-prompt tuning based on first-tester findings** — see *Eval set — first tester findings* above. Add "clarify before verdict" rule to `lib/chat/system-prompt.ts`, manually retest Q21 + Q23, target the CDI/CDD clarification gap.
+2. **Conversation CRUD polish** (favorite/delete/rename/copy/PDF) — week 6–7 work, more visible quality lift, helps testers during chat sessions.
+3. **Sliding-window summarization** (spec §7.4) — schema exists, summarizer job doesn't.
+4. **Send tester 5 more targeted questions** about CDI/CDD ambiguity to fill the gap his first batch exposed.
+
+The bracket→native-citations migration is non-urgent and deferred until eval data justifies the work.
+
+**Vercel CLI is installed** (`vercel logs --follow`, `vercel env add KEY production`). Project linked to xkodit's Vercel account. Run `vercel link` again only if `.vercel/` is missing.
+
+**Important env-var gotcha:** Vercel env vars are NOT pushed by `git push`. When you add a key to `.env.local`, also add it to Vercel via dashboard or `vercel env add NAME production` and **redeploy** (env changes don't propagate to existing deployments).
+
+**Supabase migrations:** no CLI/Docker setup. Apply migrations by pasting SQL into Supabase Dashboard → SQL Editor, or use the Management API directly with `SUPABASE_ACCESS_TOKEN` (POST to `https://api.supabase.com/v1/projects/oyfxljzdjyebescnouvo/database/query` with `{"query": "..."}`).
 
 ---
 
