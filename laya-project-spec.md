@@ -21,7 +21,7 @@
 - [x] **Profile + admin moderation** (week 6–7 work pulled forward) — `/profile` page with edit, change-password, account delete; admin views for documents, users, conversations, feedback.
 - [x] **Week 3–5: Streaming chat with tool-calling agent** — done in v1 form (commit `cc0402e`). See *Chat implementation snapshot* below for what's in and what's deferred.
 - [~] **Week 5–6: Eval set (50 Q&A) + runner** — brief + template shipped (commit `ce18cd4`). First tester (admin@kodit.ai friend) returned **11/50 filled** on 2026-05-24 — see *Eval set — first tester findings* below. Runner deferred until ≥25 filled rows.
-- [ ] **Week 6–7: Conversation CRUD (favorite, delete, copy, PDF) + sliding-window summarization** — partial (basic persistence + sidebar exist; favorite/delete/PDF/summarize not built).
+- [~] **Week 6–7: Conversation CRUD (favorite, delete, copy, PDF) + sliding-window summarization** — favorite/rename/copy/PDF/Word/delete shipped via sidebar kebab menu 2026-05-24 (commits `05e9aff` + `83713c0`). Sliding-window summarization still not built.
 - [x] **Week 7–8: In-chat thumbs/report** — shipped 2026-05-24 (commit `7cc36fa`). Red-team prompt tuning not started.
 - [ ] **Week 8+: Open closed beta** — gated on the above.
 
@@ -89,10 +89,21 @@ Three consistent patterns across both MAUVAIS rows and several OK-with-commentar
 2. ✅ **Round-2 packet sent to tester** — `eval/round-2-CDI-CDD.md`, 5 targeted questions all designed to flip verdict based on CDI vs CDD (pregnant CDD end-of-term, anticipated rupture, prime de précarité, 2-year cumulative cap, tacit CDD continuation). Tester only needs to answer "did Laya ask the contract type before answering? yes/no/partial" per question — informal WhatsApp response, no spreadsheet needed.
 3. ✅ **Runner hold-off documented** — `eval/README.md` codifies the ≥25-rows-from-2+-testers threshold.
 
+**Round-2 results — returned 2026-05-24, PASSED 5/5.** Tester sent transcripts (`round-2-CDI-CDD answers.docx` on Hussein's Desktop). Per-question verdict:
+
+| # | Question | CDI/CDD asked first? | Notes |
+|---|---|---|---|
+| 1 | Pregnant employee end-of-contract | ✅ | Also asked when pregnancy was disclosed |
+| 2 | Resignation, 8 months left | ✅ | Also asked about cadre status |
+| 3 | End-of-contract bonus | ✅ | Also asked ancienneté |
+| 4 | 7 renewals of 3-month CDD | Correctly skipped (contract type implicit) | Synthesized [Art. 15.4] + [Art. 15.6] + [Art. 15.1] cleanly, ended with the pivotal question |
+| 5 | Contract ended 2 weeks ago, still working | Correctly skipped (situation clear-cut) | Identified tacit CDI continuation, cited [Art. 7], asked the right follow-ups |
+
+Calibration is right: clarifies on individual-situation questions, doesn't over-clarify when the question is factual or self-contained. The `f976063` prompt tune is validated.
+
 **Still pending:**
 
-- **Manual retest of Q21 + Q23 locally** to verify the prompt fix changed behavior before declaring the tuning done. If Laya still jumps to verdicts, iterate on the prompt and retest before round-2 results arrive from the tester.
-- **Round-2 results from tester** — once back, either confirm the fix passes and move on, or re-tune and re-test.
+- **Manual retest of Q21 + Q23 locally** — round-1 MAUVAIS rows, not covered by round-2. Q21 = printing shop "demi-journée 8-12h actually 7-14h no break"; Q23 = "patron makes us drink tap water". Open `/chat`, paste each verbatim, confirm Laya asks clarifying questions (contract type / hours / water source) BEFORE any "c'est illégal" verdict. If still failing, iterate on `lib/chat/system-prompt.ts` and retest.
 
 ### Open non-code actions (Hussein owns — see §12 for detail)
 
@@ -111,10 +122,9 @@ Read this file first, then `git log --oneline -20` for the latest commits. The c
 
 **Most likely next slice (in order of priority):**
 
-1. **Manually retest Q21 + Q23 against the tuned prompt** — these are the two MAUVAIS rows from the first tester. Q21 = printing shop "demi-journée 8-12h actually 7-14h no break", Q23 = "patron makes us drink tap water". Open `/chat`, paste each verbatim, look for clarification questions (contract type, hours, water source) BEFORE any verdict. If Laya still jumps to "c'est illégal" without asking → iterate on `lib/chat/system-prompt.ts` and re-test. If both pass → ping the tester to run the round-2 packet (`eval/round-2-CDI-CDD.md`) and confirm CDI/CDD asking works there too.
-2. **Conversation CRUD polish** (favorite/delete/rename/copy/PDF) — week 6–7 work, more visible quality lift, helps testers during chat sessions.
-3. **Sliding-window summarization** (spec §7.4) — schema exists, summarizer job doesn't.
-4. **Wait for the tester's round-2 reply** before sending more questions or building the runner. The 11 rows already exposed the highest-leverage fix; more rows now would be diminishing returns until we know if the fix landed.
+1. **Manually retest Q21 + Q23 against the tuned prompt** — the two round-1 MAUVAIS rows. Q21 = printing shop "demi-journée 8-12h actually 7-14h no break", Q23 = "patron makes us drink tap water". Open `/chat`, paste each verbatim, look for clarification questions (contract type, hours, water source) BEFORE any verdict. Round-2 already validated CDI/CDD asking on 5 fresh scenarios — Q21/Q23 are the last gap in confidence before recruiting more testers.
+2. **Sliding-window summarization** (spec §7.4) — schema exists, summarizer job doesn't.
+3. **Recruit testers #2 and #3** for the eval set — the round-2 fix is validated, so the 11 round-1 rows are no longer the bottleneck; the next leverage is breadth (2+ testers, ≥25 filled rows) to unblock the runner.
 
 The bracket→native-citations migration is non-urgent and deferred until eval data justifies the work.
 
