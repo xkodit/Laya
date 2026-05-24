@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { createServiceClient } from "@/lib/supabase/service";
 import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 import {
   Table,
   TableBody,
@@ -21,6 +22,13 @@ const RATING: Record<
   report: { label: "🚩 Signalement", variant: "destructive" },
 };
 
+const FILTERS: { value: "all" | "up" | "down" | "report"; label: string }[] = [
+  { value: "all", label: "Tous" },
+  { value: "up", label: "👍 Positifs" },
+  { value: "down", label: "👎 Négatifs" },
+  { value: "report", label: "🚩 Signalements" },
+];
+
 function formatDate(iso: string | null): string {
   if (!iso) return "—";
   return new Date(iso).toLocaleString("fr-FR", {
@@ -31,16 +39,44 @@ function formatDate(iso: string | null): string {
   });
 }
 
-export default async function FeedbackPage() {
+export default async function FeedbackPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ rating?: string }>;
+}) {
+  const { rating: ratingParam } = await searchParams;
+  const activeFilter: "all" | "up" | "down" | "report" =
+    ratingParam === "up" || ratingParam === "down" || ratingParam === "report"
+      ? ratingParam
+      : "all";
+
   const service = createServiceClient();
 
-  const { data, error } = await service
+  // Counts per rating, independent of the active filter, so the pills can show
+  // the total each type has — useful at-a-glance.
+  const { data: countData } = await service
+    .from("message_feedback")
+    .select("rating");
+  const counts: Record<string, number> = { up: 0, down: 0, report: 0 };
+  for (const r of countData ?? []) {
+    const k = (r as { rating: string }).rating;
+    if (k in counts) counts[k]++;
+  }
+  const totalCount = counts.up + counts.down + counts.report;
+
+  let query = service
     .from("message_feedback")
     .select(
       "id, rating, comment, created_at, user_id, message_id, profiles!message_feedback_user_id_fkey(full_name, email), messages!message_feedback_message_id_fkey(content, conversation_id)",
     )
     .order("created_at", { ascending: false })
     .limit(200);
+
+  if (activeFilter !== "all") {
+    query = query.eq("rating", activeFilter);
+  }
+
+  const { data, error } = await query;
 
   // PostgREST returns embedded many-to-one relations as a single object (since
   // user_id/message_id are FKs onto unique PKs), not an array.
@@ -60,10 +96,44 @@ export default async function FeedbackPage() {
       <header className="space-y-1">
         <h1 className="text-2xl font-semibold tracking-tight">Retours</h1>
         <p className="text-sm text-muted-foreground">
-          {rows.length} retour{rows.length === 1 ? "" : "s"} (200 plus récents).
-          Cliquer un titre pour ouvrir la conversation au message concerné.
+          {rows.length} retour{rows.length === 1 ? "" : "s"} affiché
+          {rows.length === 1 ? "" : "s"} (200 max). Cliquer un titre pour ouvrir
+          la conversation au message concerné.
         </p>
       </header>
+
+      <div className="flex flex-wrap items-center gap-1.5">
+        {FILTERS.map((f) => {
+          const count =
+            f.value === "all" ? totalCount : counts[f.value] ?? 0;
+          const isActive = activeFilter === f.value;
+          const href = f.value === "all" ? "/admin/feedback" : `/admin/feedback?rating=${f.value}`;
+          return (
+            <Link
+              key={f.value}
+              href={href}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition",
+                isActive
+                  ? "border-foreground bg-foreground text-background"
+                  : "border-border bg-background text-muted-foreground hover:border-foreground/40 hover:text-foreground",
+              )}
+            >
+              {f.label}
+              <span
+                className={cn(
+                  "rounded-full px-1.5 text-[10px] tabular-nums",
+                  isActive
+                    ? "bg-background/20 text-background"
+                    : "bg-muted text-muted-foreground",
+                )}
+              >
+                {count}
+              </span>
+            </Link>
+          );
+        })}
+      </div>
 
       {error ? (
         <div className="rounded-md border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive">
@@ -89,7 +159,11 @@ export default async function FeedbackPage() {
                   colSpan={5}
                   className="py-10 text-center text-sm text-muted-foreground"
                 >
-                  Aucun retour pour l&apos;instant.
+                  {activeFilter === "all"
+                    ? "Aucun retour pour l'instant."
+                    : `Aucun retour de type « ${
+                        FILTERS.find((f) => f.value === activeFilter)?.label
+                      } » pour l'instant.`}
                 </TableCell>
               </TableRow>
             ) : (
