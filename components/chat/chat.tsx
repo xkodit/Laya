@@ -8,17 +8,24 @@ import { Send, Loader2, Square, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AnswerRenderer } from "./answer-renderer";
 import { CitedDocPanel, type CitedChunk } from "./citation";
+import {
+  MessageActions,
+  EMPTY_FEEDBACK,
+  type FeedbackState,
+} from "./message-actions";
 
 type Props = {
   conversationId: string;
   initialMessages: UIMessage[];
   initialChunks: CitedChunk[];
+  initialFeedback: Record<number, FeedbackState>;
 };
 
 export function Chat({
   conversationId,
   initialMessages,
   initialChunks,
+  initialFeedback,
 }: Props) {
   const router = useRouter();
   const [input, setInput] = useState("");
@@ -83,14 +90,24 @@ export function Chat({
           {messages.length === 0 ? (
             <EmptyState />
           ) : (
-            messages.map((m) => (
-              <MessageBubble
-                key={m.id}
-                message={m}
-                chunks={liveChunks}
-                onOpenChunk={setActiveChunk}
-              />
-            ))
+            messages.map((m, index) => {
+              const isLast = index === messages.length - 1;
+              const isStreamingThis = isBusy && isLast;
+              return (
+                <MessageBubble
+                  key={m.id}
+                  message={m}
+                  chunks={liveChunks}
+                  onOpenChunk={setActiveChunk}
+                  conversationId={conversationId}
+                  messageIndex={index}
+                  initialFeedback={
+                    initialFeedback[index] ?? EMPTY_FEEDBACK
+                  }
+                  showActions={!isStreamingThis}
+                />
+              );
+            })
           )}
           {status === "submitted" ? (
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -182,10 +199,18 @@ function MessageBubble({
   message,
   chunks,
   onOpenChunk,
+  conversationId,
+  messageIndex,
+  initialFeedback,
+  showActions,
 }: {
   message: UIMessage;
   chunks: CitedChunk[];
   onOpenChunk: (chunk: CitedChunk) => void;
+  conversationId: string;
+  messageIndex: number;
+  initialFeedback: FeedbackState;
+  showActions: boolean;
 }) {
   const isUser = message.role === "user";
   const text = message.parts
@@ -222,6 +247,13 @@ function MessageBubble({
           />
         )}
       </div>
+      {!isUser && showActions && text.length > 0 ? (
+        <MessageActions
+          conversationId={conversationId}
+          messageIndex={messageIndex}
+          initial={initialFeedback}
+        />
+      ) : null}
     </div>
   );
 }
