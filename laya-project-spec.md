@@ -101,9 +101,12 @@ Three consistent patterns across both MAUVAIS rows and several OK-with-commentar
 
 Calibration is right: clarifies on individual-situation questions, doesn't over-clarify when the question is factual or self-contained. The `f976063` prompt tune is validated.
 
-**Still pending:**
+**Q21 + Q23 manual retest — 2026-05-24, BOTH PASSED.** Transcripts archived on Hussein's Desktop (`TEST A - Q21 ANSWERS.docx` for Q21, in-chat text for Q23).
 
-- **Manual retest of Q21 + Q23 locally** — round-1 MAUVAIS rows, not covered by round-2. Q21 = printing shop "demi-journée 8-12h actually 7-14h no break"; Q23 = "patron makes us drink tap water". Open `/chat`, paste each verbatim, confirm Laya asks clarifying questions (contract type / hours / water source) BEFORE any "c'est illégal" verdict. If still failing, iterate on `lib/chat/system-prompt.ts` and retest.
+- **Q21 (printing shop multi-turn):** turns 1 and 2 (factual pause questions) answered directly. Turn 3 (the trap — "imprimerie, on doit faire demi-journée 8-12h mais le patron nous fait venir 7-14h sans pause") triggered clarification before any verdict: asked CDI/CDD, asked whether the 7h-14h schedule is *contractual or oral*, asked the meaning of "demi-journée." Closed with *"Je veux pas te donner un verdict à côté de la réalité."* Bonus: vous→tu register mirroring also worked.
+- **Q23 (tap water):** asked the water source (SODECI vs puits/citerne/bidons) and explicitly explained the SODECI-is-potable-by-default principle. No premature "infraction" verdict; no premature Inspection du Travail recommendation.
+
+Both round-1 MAUVAIS rows are now closed. The `f976063` prompt tune is fully validated across round-1 regressions AND round-2 fresh scenarios.
 
 ### Open non-code actions (Hussein owns — see §12 for detail)
 
@@ -122,9 +125,9 @@ Read this file first, then `git log --oneline -20` for the latest commits. The c
 
 **Most likely next slice (in order of priority):**
 
-1. **Manually retest Q21 + Q23 against the tuned prompt** — the two round-1 MAUVAIS rows. Q21 = printing shop "demi-journée 8-12h actually 7-14h no break", Q23 = "patron makes us drink tap water". Open `/chat`, paste each verbatim, look for clarification questions (contract type, hours, water source) BEFORE any verdict. Round-2 already validated CDI/CDD asking on 5 fresh scenarios — Q21/Q23 are the last gap in confidence before recruiting more testers.
-2. **Sliding-window summarization** (spec §7.4) — schema exists, summarizer job doesn't.
-3. **Recruit testers #2 and #3** for the eval set — the round-2 fix is validated, so the 11 round-1 rows are no longer the bottleneck; the next leverage is breadth (2+ testers, ≥25 filled rows) to unblock the runner.
+1. **Recruit testers #2 and #3** for the eval set — the prompt tune is fully validated (round-1 MAUVAIS fixed + round-2 fresh scenarios 5/5). The bottleneck is now breadth: need ≥25 filled rows from 2+ testers to unblock the runner (per `eval/README.md`). Also covers the §12 "Beta tester pipeline" item.
+2. **Sliding-window summarization** (spec §7.4) — schema exists, summarizer job doesn't. Becomes visible as soon as testers run conversations past ~20 turns.
+3. **Closed-beta open** (week 8+) — once testers #2/#3 have run a full pass, expand allowlist per §13.
 
 The bracket→native-citations migration is non-urgent and deferred until eval data justifies the work.
 
