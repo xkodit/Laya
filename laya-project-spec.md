@@ -105,7 +105,35 @@ Three consistent patterns across both MAUVAIS rows and several OK-with-commentar
 
 **Q21 + Q23 manual retest — 2026-05-24, Hussein-only pre-check.** Transcripts on Hussein's Desktop (`TEST A - Q21 ANSWERS.docx` for Q21, in-chat text for Q23). Both *appear* to pass — Laya asked the right clarifying questions before any verdict (contract type / schedule writing / "demi-journée" meaning for Q21; water source + SODECI principle for Q23). **Pending Hadi's V&V verdict on these** — given the round-2 miss above, Hussein-only passes are preliminary.
 
-**Status of the `f976063` prompt tune:** partially validated. The "clarify before verdict" axis works, but the prompt needs a follow-up edit to add the signal-inference rule + the bad-intent reframe behavior. Iteration on hold until Hadi returns his Q21/Q23 verdicts so all findings land in one prompt-edit cycle.
+### Full V&V — Hadi's 50-question pass (2026-05-25)
+
+Raw CSV archived at `eval/filled/hadi-remaining-2026-05-25.csv`. Tally: **41 OK / 8 MAUVAIS / 1 blank (Q46, treated as OK — Hadi left no commentary because the response was fine)**.
+
+| Category | OK | MAUVAIS | Items flagged |
+|---|---|---|---|
+| factuel_simple (1–10) | 7 | 3 | Q4, Q9, Q10 |
+| multi_articles (11–20) | 8 | 2 | Q17, Q19 |
+| clarification (21–30) | 8 | 2 | **Q21, Q23** (the retest items) |
+| hors_corpus (31–40) | 9 | 1 | Q40 |
+| adversarial (41–50) | 10 | 0 | — (Q46 blank counted OK) |
+
+**Headline: the `f976063` prompt tune is NOT validated.** Hussein's Q21/Q23 prelim was misleading again — same pattern as the round-2 walk-back. Hadi's verdict (per [[feedback_eval_signoff]] — only Hadi's verdict makes an eval item validated) marks both MAUVAIS.
+
+- **Q21 (printing shop, MAUVAIS)** — Laya asserted "doublement illégal" with overtime owed on the basis that demi-journée = 4h. That's traditional practice in CI, not law. Pause-break half of the answer was correct; the heures sup conclusion was unsupported.
+- **Q23 (no potable water, MAUVAIS)** — went straight to "saisir l'Inspection du Travail" without asking the water source. If it's public SODECI tap water, the employer IS providing potable water — no infraction.
+
+Both are the **infer-vs-assume axis** Hadi flagged in round-2: "clarify before verdict" is not enough — Laya must also *not* commit to a legal conclusion built on an unverified factual assumption.
+
+**Other patterns surfaced (new):**
+
+1. **Article-citation rendering bug (Q9 / Q10 / Q17).** Clicking a `[Art. X.Y]` badge in chat opened the wrong article's text. Q9: continuing the same chat from Q7 (minors-at-night) → Q9's article links resolved to Q7's chunks. Q10 + Q17: in a single answer, clicking three distinct `Art. 15.x` cites all opened the same Art. 15.4 text. Root cause: `components/chat/answer-renderer.tsx` `matchChunk` fell back to a doc-level substring match (`"loi n° 2015-532"`) that always returned the first chunk inserted, and `components/chat/chat.tsx` pooled every conversation chunk into a single lookup. **Fixed:** per-message chunk scoping, citation inner split on comma so the article portion alone resolves against an article-only map, dash-separated normalization with strict prefix-only hierarchical fallback. Files: `components/chat/answer-renderer.tsx`, `components/chat/chat.tsx`, `app/chat/[id]/page.tsx`. **Pending Hadi's V&V retest of Q9/Q10/Q17 in the UI.**
+2. **Over-answering / scope leak (Q19).** Mentioned the 3% indemnité de fin de CDD in a question that explicitly said the employee continued working — the indemnité doesn't apply when the contract continues. Wasted tokens, weakens signal.
+3. **Capability hallucination (Q40).** Offered "je peux aller chercher ce que prévoit votre convention collective" — Laya doesn't have sector conventions in corpus. Promise she can't keep.
+4. **Response structure (Q4).** Led with the CDI exception (where written contract isn't strictly required) instead of the standard procedure first. Should explain the rule, then the exception, not the reverse.
+
+**Note on reading Hadi's commentary:** he writes the *logic* behind the verdict, not letter-perfect rules. Apply the principle, not a literal patch.
+
+**Status of the `f976063` prompt tune:** **not validated.** The "clarify before verdict" axis works on questions where the answer hinges on a missing variable, but breaks when Laya commits to a fact (Q21 demi-journée, Q23 water source) that should have been confirmed. Next prompt iteration must cover: signal-inference (don't ask redundantly when the question pins the variable — round-2 finding), assumption-naming (when committing to a fact, say so explicitly — Q21/Q23 finding), scope discipline (Q19), capability honesty (Q40), structure-rule of standard-before-exception (Q4).
 
 ### Open non-code actions (Hussein owns — see §12 for detail)
 
@@ -124,13 +152,18 @@ Read this file first, then `git log --oneline -20` for the latest commits. The c
 
 **Most likely next slice (in order of priority):**
 
-1. **Wait for Hadi's Q21/Q23 verdicts**, then iterate the prompt once with all round-2 + round-1-retest findings folded in. Two rules to add to `lib/chat/system-prompt.ts`:
-   - **Signal inference** — if the question's surface text already pins down the variable (e.g. "fin de contrat" / "X mois restants" / "prime de fin" → CDD), state the assumption explicitly and proceed; don't ask a redundant question.
-   - **Bad-intent reframe** — when a question signals discriminatory intent toward a protected category (pregnancy, etc.), name the issue politely *and* offer a lawful pivot (e.g. ask about performance as a legitimate ground). Stronger than §6.4's bilateral-honesty default; closer to soft-refusal-with-pivot.
-2. **Re-run round-2 + Q21/Q23 against the new prompt**, send Hadi the new transcripts for V&V signoff before declaring anything closed.
-3. **Recruit testers #2 and #3** (5–7 names across personas) — once Hadi signs off, the bottleneck becomes breadth. Need ≥25 filled rows from 2+ testers to unblock the runner (per `eval/README.md`). Also covers the §12 "Beta tester pipeline" item.
-4. **Sliding-window summarization** (spec §7.4) — schema exists, summarizer job doesn't. Becomes visible as soon as testers run conversations past ~20 turns.
-5. **Closed-beta open** (week 8+) — once testers #2/#3 have run a full pass, expand allowlist per §13.
+1. **Hadi V&V retest of the article-citation fix** — Q9, Q10, Q17 in the live UI. Code change is in `components/chat/{answer-renderer,chat}.tsx` + `app/chat/[id]/page.tsx`; mechanically the lookup is now per-message and the doc-alias substring leak is closed, but the regression-proof is Hadi clicking the badges and seeing the right article text.
+2. **Iterate the system prompt** with all round-2 + Hadi-50 findings folded in. Rules to add to `lib/chat/system-prompt.ts`:
+   - **Signal inference** — if the question's surface text pins down the variable (e.g. "fin de contrat" / "X mois restants" / "prime de fin" → CDD), state the assumption explicitly and proceed; don't ask a redundant question.
+   - **Assumption-naming before legal commitment** (Q21/Q23) — when Laya is about to declare a violation or commit to a legal conclusion built on a factual assumption (demi-journée = 4h, water = non-potable, etc.), she must either confirm the fact with one targeted question OR state the assumption explicitly. No verdict built on an unverified fact.
+   - **Scope discipline** (Q19) — only mention an article when it applies to the case at hand. If the question already excludes the scenario (e.g. "I continued working after my CDD"), don't volunteer the alternative case's law (indemnité de fin de contrat).
+   - **Capability honesty** (Q40) — Laya does not have sector conventions collectives. Never offer to "look up" the convention; redirect to DGT / délégué du personnel / RH.
+   - **Standard-before-exception** (Q4) — explain the rule first, then the exception. Not the other way around.
+   - **Bad-intent reframe** (carried from round-2) — when a question signals discriminatory intent toward a protected category, name the issue politely *and* offer a lawful pivot.
+3. **Re-run round-2 + Q21/Q23 + Q4/Q19/Q40 against the new prompt**, send Hadi the new transcripts for V&V signoff before declaring anything closed.
+4. **Recruit testers #2 and #3** (5–7 names across personas) — once Hadi signs off, the bottleneck becomes breadth. Need ≥25 filled rows from 2+ testers to unblock the runner (per `eval/README.md`). Also covers the §12 "Beta tester pipeline" item.
+5. **Sliding-window summarization** (spec §7.4) — schema exists, summarizer job doesn't. Becomes visible as soon as testers run conversations past ~20 turns.
+6. **Closed-beta open** (week 8+) — once testers #2/#3 have run a full pass, expand allowlist per §13.
 
 The bracket→native-citations migration is non-urgent and deferred until eval data justifies the work.
 
