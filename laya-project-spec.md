@@ -5,7 +5,7 @@
 
 ---
 
-## 0. Status (as of 2026-05-24)
+## 0. Status (as of 2026-05-25)
 
 **Decision: GO.** Branding locked, all architectural decisions locked. Coding underway since 2026-05-22.
 
@@ -20,7 +20,7 @@
 - [x] **Week 2–3: Local Python ingestion** — `scripts/ingest.py` with article-aware chunking, Voyage `voyage-3` embeddings, Claude vision OCR fallback for scanned PDFs, corpus storage bucket. `--from-pending` mode drains admin-uploaded documents. Two launch PDFs ingested. `match_chunks` RPC + smoke-test script proves vector retrieval returns sane results.
 - [x] **Profile + admin moderation** (week 6–7 work pulled forward) — `/profile` page with edit, change-password, account delete; admin views for documents, users, conversations, feedback.
 - [x] **Week 3–5: Streaming chat with tool-calling agent** — done in v1 form (commit `cc0402e`). See *Chat implementation snapshot* below for what's in and what's deferred.
-- [~] **Week 5–6: Eval set (50 Q&A) + runner** — brief + template shipped (commit `ce18cd4`). First tester (admin@kodit.ai friend) returned **11/50 filled** on 2026-05-24 — see *Eval set — first tester findings* below. Runner deferred until ≥25 filled rows.
+- [~] **Week 5–6: Eval set (50 Q&A) + runner** — brief + template shipped (commit `ce18cd4`). First tester (admin@kodit.ai friend) returned **11/50** on 2026-05-24, then a full **50/50 V&V pass on 2026-05-25** (41 OK / 8 MAUVAIS / 1 blank-counted-OK) — see *Full V&V — Hadi's 50-question pass* below. Runner still deferred until ≥25 filled rows from ≥2 testers.
 - [~] **Week 6–7: Conversation CRUD (favorite, delete, copy, PDF) + sliding-window summarization** — favorite/rename/copy/PDF/Word/delete shipped via sidebar kebab menu 2026-05-24 (commits `05e9aff` + `83713c0`). Sliding-window summarization still not built.
 - [x] **Week 7–8: In-chat thumbs/report** — shipped 2026-05-24 (commit `7cc36fa`). Red-team prompt tuning not started.
 - [ ] **Week 8+: Open closed beta** — gated on the above.
@@ -43,9 +43,9 @@
 **UI**
 
 - `/chat` → generates a uuid and redirects to `/chat/[id]`. The conversation row isn't created in the DB until the first message arrives (the API upserts on POST).
-- `/chat/[id]` server-loads conversation + messages + flattened citations and hands them to the `<Chat>` client component.
-- `<Chat>` uses `useChat` with `id: conversationId, messages: initialMessages`; merges DB-loaded chunks with chunks streaming in from live tool parts into a single pool keyed by `chunk.id`.
-- Inline citation badges render via `components/chat/answer-renderer.tsx` (regex tokenizer over the streamed text — partial brackets stay as plain text until the closing bracket arrives). Match is by normalized `article_ref` against the chunk pool, with a substring fallback. Unmatched brackets render as a dim non-interactive badge.
+- `/chat/[id]` server-loads conversation + messages + per-message citations (indexed by position) and hands them to the `<Chat>` client component.
+- `<Chat>` uses `useChat` with `id: conversationId, messages: initialMessages`. Each `MessageBubble` resolves its own chunks (the DB-persisted citations for that row + any tool-output chunks on the live message's parts) — citations are scoped per turn so a cite in turn N can't accidentally resolve to a chunk retrieved during turn M (post-fix `a6b25c1`, 2026-05-25).
+- Inline citation badges render via `components/chat/answer-renderer.tsx` (regex tokenizer over the streamed text — partial brackets stay as plain text until the closing bracket arrives). Lookup splits the citation inner on comma, resolves the article portion against an article-only map (with prefix-strict hierarchical fallback so "Art. L.16" matches "Art. L.16.7" but "Art. 5" doesn't match "Art. 51.4"), and falls back to a doc-only map for citations like `[Loi n° 2015-532]`. Unmatched brackets render as a dim non-interactive badge.
 - Side panel is the shadcn `Sheet` (right-anchored, 420px). Doc reference + indigo article-ref headline + parent section + cited content with a gold left-border anchor.
 - "Info générale, non sourcée" pill is rendered when the tokenizer sees the `[INFO]` token.
 - `/` redirects signed-in users to `/chat`. `AppHeader` (non-chat pages) gained a Conversations link.
