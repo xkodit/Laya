@@ -10,45 +10,68 @@ const CITATION_REGEX =
   /\[(?:Art\.?|Article|Décret|Loi|art\.?|article|décret|loi)[^\[\]\n]{1,80}\]/g;
 const INFO_TOKEN = "[INFO]";
 
-// Normalize for matching against chunk.article. Drops punctuation and case.
+// Normalize for matching against chunk.article. Collapses punctuation to a
+// dash so hierarchical components stay distinguishable: "Art. L.16.7" becomes
+// "art-l-16-7", which lets the parent/child fallback below reason safely
+// (without the dash, "art5" would incorrectly match "art514").
 function normalize(s: string): string {
   return s
     .toLowerCase()
     .replace(/n°/g, "n")
-    .replace(/[^\p{Letter}\p{Number}]+/gu, "");
+    .replace(/[^\p{Letter}\p{Number}]+/gu, "-")
+    .replace(/^-+|-+$/g, "");
 }
 
-// Build a lookup from normalized article -> chunk. We also fold in normalized
-// substrings of `doc` (e.g. "Loi n° 2015-532") so document-level cites match.
-function buildLookup(chunks: CitedChunk[]): Map<string, CitedChunk> {
-  const map = new Map<string, CitedChunk>();
+type Lookup = {
+  byArticle: Map<string, CitedChunk>;
+  byDoc: Map<string, CitedChunk>;
+};
+
+function buildLookup(chunks: CitedChunk[]): Lookup {
+  const byArticle = new Map<string, CitedChunk>();
+  const byDoc = new Map<string, CitedChunk>();
   for (const c of chunks) {
     if (c.article) {
       const key = normalize(c.article);
-      if (key && !map.has(key)) map.set(key, c);
+      if (key && !byArticle.has(key)) byArticle.set(key, c);
     }
     if (c.doc) {
       const key = normalize(c.doc);
-      if (key && !map.has(key)) map.set(key, c);
+      if (key && !byDoc.has(key)) byDoc.set(key, c);
     }
   }
-  return map;
+  return { byArticle, byDoc };
 }
 
-function matchChunk(
-  badgeText: string,
-  lookup: Map<string, CitedChunk>,
-): CitedChunk | null {
-  // Inner text without brackets
+function matchChunk(badgeText: string, lookup: Lookup): CitedChunk | null {
+  // Inner text without brackets, e.g. "Art. 15.4, Loi n° 2015-532"
   const inner = badgeText.slice(1, -1);
-  const key = normalize(inner);
-  if (!key) return null;
-  // Exact match first
-  const hit = lookup.get(key);
-  if (hit) return hit;
-  // Substring fallback (cite says "Art. L.16" but chunk article is "Art. L.16.7")
-  for (const [k, v] of lookup.entries()) {
-    if (k.includes(key) || key.includes(k)) return v;
+  // Split off any doc suffix — the article portion is what we resolve against
+  // byArticle. Without this split, a cite like "Art. 15.6, Loi n° 2015-532"
+  // would never exact-match a chunk whose article is just "Art. 15.6".
+  const articlePart = inner.split(",")[0]!.trim();
+  const articleKey = normalize(articlePart);
+
+  if (articleKey) {
+    const exact = lookup.byArticle.get(articleKey);
+    if (exact) return exact;
+    // Hierarchical fallback: chunk article is a child of the cite (cite says
+    // "Art. L.16", chunk is "Art. L.16.7"). Requires the dash boundary so we
+    // don't match "art-5" against "art-51-4".
+    for (const [k, v] of lookup.byArticle.entries()) {
+      if (k.startsWith(`${articleKey}-`)) return v;
+    }
+    // Reverse direction (cite is a child of chunk).
+    for (const [k, v] of lookup.byArticle.entries()) {
+      if (articleKey.startsWith(`${k}-`)) return v;
+    }
+  }
+
+  // Doc-only citation like "[Loi n° 2015-532]" — fall back to the doc map.
+  const fullKey = normalize(inner);
+  if (fullKey) {
+    const docHit = lookup.byDoc.get(fullKey);
+    if (docHit) return docHit;
   }
   return null;
 }

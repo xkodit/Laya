@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, type UIMessage } from "ai";
@@ -17,14 +17,14 @@ import {
 type Props = {
   conversationId: string;
   initialMessages: UIMessage[];
-  initialChunks: CitedChunk[];
+  initialChunksByIndex: Record<number, CitedChunk[]>;
   initialFeedback: Record<number, FeedbackState>;
 };
 
 export function Chat({
   conversationId,
   initialMessages,
-  initialChunks,
+  initialChunksByIndex,
   initialFeedback,
 }: Props) {
   const router = useRouter();
@@ -50,29 +50,6 @@ export function Chat({
     },
   });
 
-  // Union of DB-loaded chunks + chunks streaming in from live tool calls.
-  // Re-derived on every render — cheap, and React.memo isn't worth the cost
-  // here because messages change frequently during streaming anyway.
-  const liveChunks = useMemo<CitedChunk[]>(() => {
-    const seen = new Set(initialChunks.map((c) => c.id));
-    const out: CitedChunk[] = [...initialChunks];
-    for (const m of messages) {
-      if (m.role !== "assistant") continue;
-      for (const part of m.parts) {
-        if (!part.type.startsWith("tool-")) continue;
-        const output = (part as { output?: { chunks?: CitedChunk[] } }).output;
-        if (!output?.chunks) continue;
-        for (const c of output.chunks) {
-          if (c && c.id && !seen.has(c.id)) {
-            seen.add(c.id);
-            out.push(c);
-          }
-        }
-      }
-    }
-    return out;
-  }, [messages, initialChunks]);
-
   const scrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     scrollRef.current?.scrollTo({
@@ -97,7 +74,7 @@ export function Chat({
                 <MessageBubble
                   key={m.id}
                   message={m}
-                  chunks={liveChunks}
+                  chunks={chunksForMessage(m, index, initialChunksByIndex)}
                   onOpenChunk={setActiveChunk}
                   conversationId={conversationId}
                   messageIndex={index}
@@ -179,6 +156,34 @@ export function Chat({
       />
     </div>
   );
+}
+
+// Chunks for a single message: citations persisted with that DB row (when this
+// is a reloaded message), plus any chunks streaming in via tool-call outputs on
+// the live message. Scoping per turn — instead of pooling across the whole
+// conversation — keeps citation lookup deterministic when several turns cite
+// articles from the same document.
+function chunksForMessage(
+  message: UIMessage,
+  index: number,
+  initialMap: Record<number, CitedChunk[]>,
+): CitedChunk[] {
+  const seen = new Set<string>();
+  const out: CitedChunk[] = [];
+  const push = (c: CitedChunk | null | undefined) => {
+    if (c && c.id && !seen.has(c.id)) {
+      seen.add(c.id);
+      out.push(c);
+    }
+  };
+  for (const c of initialMap[index] ?? []) push(c);
+  for (const part of message.parts) {
+    if (!part.type.startsWith("tool-")) continue;
+    const output = (part as { output?: { chunks?: CitedChunk[] } }).output;
+    if (!output?.chunks) continue;
+    for (const c of output.chunks) push(c);
+  }
+  return out;
 }
 
 function EmptyState() {

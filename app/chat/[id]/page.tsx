@@ -41,22 +41,26 @@ export default async function ChatThreadPage({
       ).data ?? [])
     : [];
 
-  const initialMessages: UIMessage[] = rows
-    .filter(
-      (m): m is { id: string; role: string; content: string; citations: unknown } =>
-        m.role === "user" || m.role === "assistant",
-    )
-    .map((m) => ({
-      id: m.id,
-      role: m.role as "user" | "assistant",
-      parts: [{ type: "text", text: m.content }],
-    }));
-
-  // Flatten all chunks ever cited in this conversation into a single pool. The
-  // renderer keys by article_ref, so dupes across turns are harmless.
-  const initialChunks: CitedChunk[] = rows.flatMap((m) =>
-    Array.isArray(m.citations) ? (m.citations as CitedChunk[]) : [],
+  const filteredRows = rows.filter(
+    (m): m is { id: string; role: string; content: string; citations: unknown } =>
+      m.role === "user" || m.role === "assistant",
   );
+
+  const initialMessages: UIMessage[] = filteredRows.map((m) => ({
+    id: m.id,
+    role: m.role as "user" | "assistant",
+    parts: [{ type: "text", text: m.content }],
+  }));
+
+  // Per-message citations, indexed by position in initialMessages. Keeping
+  // these scoped per turn prevents a citation in turn N from accidentally
+  // resolving to a chunk retrieved during turn M.
+  const initialChunksByIndex: Record<number, CitedChunk[]> = {};
+  filteredRows.forEach((m, i) => {
+    if (Array.isArray(m.citations)) {
+      initialChunksByIndex[i] = m.citations as CitedChunk[];
+    }
+  });
 
   // Load this user's existing feedback for the assistant messages in view so
   // the thumbs-up / thumbs-down / report state survives a page reload. Keyed
@@ -98,7 +102,7 @@ export default async function ChatThreadPage({
     <Chat
       conversationId={id}
       initialMessages={initialMessages}
-      initialChunks={initialChunks}
+      initialChunksByIndex={initialChunksByIndex}
       initialFeedback={initialFeedback}
     />
   );
