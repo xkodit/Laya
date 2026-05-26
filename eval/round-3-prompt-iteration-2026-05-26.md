@@ -1,5 +1,7 @@
 # Round 3 — V&V de l'itération du prompt (post Hadi-50)
 
+**Dernière mise à jour : 2026-05-26 (en soirée).** Refresh avec les derniers transcripts après deux itérations supplémentaires (durcissement Q4 + revert d'un test Haiku) et après l'expansion du corpus (CCI 1977 + 3 autres docs).
+
 Salut Hadi !
 
 Après tes 50 questions, j'ai fait une grosse itération du system prompt pour répondre aux 8 MAUVAIS que tu avais flagués + le bug d'affichage des citations.
@@ -12,6 +14,11 @@ J'ai déjà retesté chaque question — voici les transcripts. Ton verdict V&V 
 - `31ffbb1` — 6 nouvelles règles ajoutées au prompt
 - `1fd082e` — renforcement Q4 (structure règle-puis-exception promue en section dédiée)
 - `2d93c57` — renforcement Q19 (la règle disait juste "ne pas mentionner hors-sujet" → précisée à "même pour expliquer que ça ne s'applique pas")
+- `d95fbd9` — durcissement Q4 supplémentaire (anti-example "MAUVAISE ouverture" + auto-vérification) — initialement nécessaire pour Haiku (voir ci-dessous), conservé sur Sonnet car strict-additif
+
+**Note importante — état du corpus :** depuis l'envoi initial de ce paquet, 4 nouveaux docs ont été ingérés (Convention Interprofessionnelle 1977, Décret 2024-902 obligations employeurs, Code de Prévoyance Sociale CIV-57048, Décret n° 96-197 règlement intérieur). Laya peut maintenant citer depuis ces nouvelles sources — certaines réponses ci-dessous l'utilisent. Si tu vois une citation depuis un de ces nouveaux docs, c'est normal.
+
+**Détour Haiku (info, pas pour V&V) :** on a testé Haiku 4.5 pour réduire le coût par message. Q4 a regressé puis re-passé après le `d95fbd9` ; mais Q21 a halluciné un seuil légal de 6h pour la pause (fabrication sous citation `[Art. 11]` qui ne dit pas ça). Revert à Sonnet — Haiku n'est pas viable pour Laya. Les transcripts ci-dessous sont tous sur **Sonnet 4.6**.
 
 ---
 
@@ -35,33 +42,21 @@ J'ai déjà retesté chaque question — voici les transcripts. Ton verdict V&V 
 
 **Règle ajoutée :** Structure règle-puis-exception (avec ton exemple du contrat écrit comme cas type dans le prompt).
 
-**Réponse Laya v3 :**
+**Réponse Laya v3 (refresh post-`d95fbd9`) :**
 
-> Bonne question — et la réponse est "ça dépend du type de contrat". Laisse-moi chercher les textes précis. Voilà les textes qu'il faut. La réponse courte : **dans la grande majorité des cas, oui, l'écrit est obligatoire** — sauf pour le CDI classique, où la loi laisse une liberté de forme. Voici le détail :
+> Bonne question — et la réponse est plus nuancée qu'un simple oui ou non.
 >
-> ---
+> **La règle générale : l'écrit s'impose dans la majorité des cas concrets.**
 >
-> **La règle générale : l'écrit est requis**
+> Pour un CDD, c'est sans ambiguïté : le contrat doit obligatoirement être écrit ou constaté par une lettre d'embauche [Art. 15.2]. Même chose pour le travail temporaire/intérim, qui exige un contrat écrit avec des mentions précises [Art. 14]. Et si les parties décident d'inclure une période d'essai, l'écrit devient également obligatoire — le contrat ou la lettre d'embauche doit mentionner expressément la durée de cet essai [Art. 14.5].
 >
-> Pour les contrats les plus courants dans une entreprise, l'écrit n'est pas optionnel :
+> **L'exception : le CDI peut techniquement être verbal.**
 >
-> - **CDD** : doit obligatoirement être passé par écrit ou constaté par une lettre d'embauche [Art. 15.2]. Et attention — un CDD qui ne respecte pas cette exigence (et les autres conditions de forme) est automatiquement **requalifié en CDI** [Art. 15.10].
-> - **Contrat de travail temporaire (intérim)** : l'écrit est aussi obligatoire, avec des mentions spécifiques à inclure [Art. 14].
-> - **Période d'essai** (CDI ou CDD) : si les parties décident d'inclure une période d'essai, le contrat doit être écrit ou constaté par une lettre d'embauche mentionnant sa durée [Art. 14.5].
+> Pour un CDI sans période d'essai, la loi pose un principe de liberté de forme : le contrat est "constaté dans les formes qu'il convient aux parties d'adopter" [Art. 14.2]. Un accord verbal est donc juridiquement possible.
 >
-> ---
+> Mais franchement, en pratique, c'est très peu recommandable — ni pour l'employeur ni pour le salarié. Sans écrit, prouver les termes convenus (salaire, poste, classification) devient compliqué dès le premier litige.
 >
-> **L'exception : le CDI sans période d'essai**
->
-> Pour un CDI conclu directement, la loi pose un principe de liberté de forme : "le contrat de travail est passé librement… constaté dans les formes qu'il convient aux parties d'adopter" [Art. 14.2]. Techniquement, un CDI verbal est donc possible.
->
-> Mais franchement, dans la pratique — et encore plus à votre niveau en tant que cadre — c'est une option à éviter. Sans écrit, impossible de prouver les termes convenus (salaire, poste, avantages, clauses particulières). Le décret d'application confirme d'ailleurs que le contrat écrit doit comporter une liste précise de mentions [Art. 14.2].
->
-> ---
->
-> En résumé : si c'est un CDD, un intérim, ou qu'il y a une période d'essai → **l'écrit est une obligation légale**, pas un choix. Si c'est un CDI sans période d'essai → c'est techniquement libre, mais l'écrit reste fortement recommandé.
->
-> Vous avez une situation particulière en tête — côté employeur ou salarié ?
+> **En résumé :** si vous êtes en train de recruter ou de formaliser une situation, l'écrit est la bonne option dans tous les cas — et l'obligation dans la plupart. Vous avez une situation particulière en tête ?
 
 **Verdict Hadi :**
 
@@ -102,67 +97,62 @@ Q17 — "Un CDD peut être renouvelé plusieurs fois ou il y a une limite ?"
 
 **Message 1 (utilisateur) :** "combien d'heure de pause l'employeur doit donné pour 7 heures de travail"
 
-**Réponse Laya :**
+**Réponse Laya (refresh post-corpus expansion) :**
 
-> Salut, je suis Laya. Bonne question, voici ce que dit le texte.
+> Bonne question, et la réponse dépend un peu du contexte — voici ce que dit la loi.
 >
-> La loi ivoirienne ne fixe pas une durée de pause en fonction d'un nombre précis d'heures travaillées comme un ratio automatique. Ce qu'elle prévoit, c'est une **pause minimale d'une demi-heure (30 minutes)** pour une journée de travail en continu pouvant aller jusqu'à 8 heures [Art. 10, Loi n° 2015-532] [Art. 11, Décret n° 2024-898]. Cette pause peut être prise en une seule fois ou fractionnée en plusieurs fois.
+> **La règle posée par les textes** concerne spécifiquement le travail en continu (service de quart, sans interruption) : pour une journée de travail allant jusqu'à 8 heures, une pause d'au moins **une demi-heure** doit être accordée, prise en une ou plusieurs fois [Art. 10 - Loi n° 2015-532] [Art. 11 - Décret n° 2024-898].
 >
-> Donc pour 7 heures de travail : le minimum légal est **30 minutes de pause**, que l'employeur peut fixer librement ou définir d'accord avec les salariés.
+> Pour un régime de **7 heures de travail en continu**, cette règle de la demi-heure minimum s'applique donc.
 >
-> Deux précisions importantes :
-> - Ce minimum de 30 minutes s'applique dans le cadre du **travail en continu** (service de quart, roulement). Pour les autres régimes, la pause du midi (déjeuner) est souvent ce qui sépare la journée en deux demi-journées — mais là, c'est la pratique courante, pas un plancher légal distinct.
-> - L'employeur garde une certaine flexibilité sur l'organisation concrète : il peut accorder plus, ou fractionner la pause, selon les besoins du service.
+> **Ce que la loi ne fixe pas en dehors du travail en continu**, c'est un seuil universel de pause pour tout type d'horaire. Dans ce cas, c'est le règlement intérieur de l'entreprise qui s'applique [Art. 7 - Décret n° 2024-898] — il doit mentionner l'horaire journalier et les modalités.
 >
-> Vous avez une situation précise en tête chez Nouvelle Mici Embaci — pause non accordée, durée insuffisante, ou autre chose ?
+> En pratique, voici ce que ça signifie pour vous :
+> - Si le travail est organisé en continu (sans coupure pour repas par exemple), la loi impose **minimum 30 minutes** de pause sur les 7h.
+> - Si le travail est organisé avec une coupure classique (ex. 8h-12h / 14h-17h), la coupure du midi compte comme temps de repos — dans ce cas, la pause est déjà intégrée dans la structure de la journée.
+>
+> Vous avez une situation particulière en tête — des salariés qui travaillent 7h sans pause du tout ?
 
 **Message 2 (utilisateur) :** "combien d'heure minimum de travail pour avoir 30 mins de pause?"
 
-**Réponse Laya :**
+**Réponse Laya (refresh — utilise CCI 1977 maintenant en corpus) :**
 
-> Bonne question, laissez-moi vérifier ça précisément dans les textes. Voilà, et je vais être honnête avec vous : **le Code du travail ivoirien ne fixe pas de seuil minimum d'heures travaillées pour déclencher automatiquement une pause.**
+> Bonne question, laissez-moi chercher ça précisément. Voilà ce que les textes disent précisément.
 >
-> Ce que les textes prévoient, c'est ceci :
+> **La règle générale (travail en continu / service de quart)** : la pause de 30 minutes minimum est intégrée dans une journée de **8 heures maximum** [Art. 10 - Loi n° 2015-532] [Art. 11 - Décret n° 2024-898]. La loi ne fixe pas un seuil d'heures à partir duquel la pause se déclenche — elle dit simplement que la journée de 8h inclut au moins 30 min de pause.
 >
-> La pause de **30 minutes minimum** est mentionnée dans le cadre spécifique du **travail en continu** (service de quart, roulement jour/nuit), pour une journée qui peut aller jusqu'à 8 heures [Art. 10, Loi n° 2015-532] [Art. 11, Décret n° 2024-898]. Le texte dit que la journée de travail "ne peut excéder 8 heures, **y compris** la période de pause d'une demi-heure au moins."
+> **Ce qui est plus précis, c'est une convention collective** qui donne le seuil que vous cherchez : dès que le travail ininterrompu dépasse **6 heures**, une demi-heure de pause payée doit être accordée. Et si ce travail tombe un dimanche ou un jour férié, c'est **1 heure** de pause payée [Art. 52 - Convention AICI/UGTCI du 19 juillet 1977].
 >
-> Autrement dit : les 30 minutes de pause sont **incluses dans** les 8 heures, pas en plus.
+> En résumé pratique :
+> - **Moins de 6h de travail continu** → pas de seuil légal universel fixant une pause obligatoire.
+> - **Plus de 6h de travail continu** → 30 minutes de pause, payées comme du temps de travail (selon la convention collective).
+> - **Plus de 6h un dimanche ou jour férié** → 1 heure de pause payée.
 >
-> Pour le travail de nuit, c'est différent : la loi prévoit **une ou deux pauses de 15 minutes** sur 8 heures consécutives [Art. 5, Loi n° 2015-532].
->
-> [INFO] En dehors du travail en continu et du travail de nuit, la loi ne fixe pas de règle chiffrée type "après X heures, droit à Y minutes de pause". En pratique, la pause déjeuner (souvent 1h) est la norme dans beaucoup d'entreprises, mais c'est une pratique ou une clause contractuelle — pas un plancher légal distinct pour le régime classique de jour.
->
-> Vous avez un cas concret en tête ? Un horaire précis ou un type de poste chez Nouvelle Mici Embaci ?
+> Un point important : cette convention collective (AICI/UGTCI) couvre un secteur spécifique. Si votre entreprise n'en relève pas, c'est le règlement intérieur et les usages de l'entreprise qui s'appliquent pour fixer ce seuil. Vous avez un cas concret à l'esprit pour Nouvelle Mici Embaci ?
 
 **Message 3 (utilisateur) :** "Je travail dans une imprimerie, les ou on doit faire demi journée, au lieu de faire 4h de travail (8-12h) comme toutes les autres société il nous fait venir de 7-14h, et sans pause"
 
-**Réponse Laya :**
+**Réponse Laya (refresh — utilise CCI 1977 + math corrigé) :**
 
-> D'accord, je vois mieux la situation. Laissez-moi chercher ce que les textes disent sur la durée du travail et les pauses. OK, j'ai ce qu'il faut. Voilà ce que ça donne concrètement dans ton cas.
+> Ça c'est une situation concrète qui mérite qu'on regarde ça sérieusement. Laissez-moi chercher ce que la loi dit sur les horaires et les pauses. Voilà, j'ai ce qu'il faut. Votre situation soulève deux problèmes distincts.
 >
-> **Le problème des heures : 7h de travail un jour de demi-journée**
+> **1. Les heures en trop — c'est du temps supplémentaire qui doit être payé**
 >
-> La durée légale de travail est de **40 heures par semaine** pour une entreprise non agricole [Art. 21.2, Loi n° 2015-532]. Si ta "demi-journée" est censée être la moitié de ta semaine de travail normale, faire venir les salariés de 7h à 14h (7 heures) là où les autres boites font 4h (8h-12h), c'est clairement du dépassement — les heures au-delà de la durée normale **sont des heures supplémentaires** et doivent être majorées.
+> Une "demi-journée" de travail, légalement, s'inscrit dans un horaire de 40h/semaine [Art. 21.2 - Loi n° 2015-532]. L'employeur répartit librement ces heures — 8h/jour sur 5 jours, ou 6h40 sur 6 jours, etc. [Art. 6 - Décret n° 2024-898]. Mais toute heure au-delà de ces 40h hebdomadaires devient une **heure supplémentaire majorée**.
 >
-> Concrètement, les majorations minimales sont :
-> - **+15 %** pour les heures de la 41e à la 46e heure de la semaine
-> - **+50 %** pour les heures au-delà de la 46e heure [Art. 25, Décret n° 2024-898]
+> Si les autres jours de la semaine vous faites déjà vos heures normales, les heures faites au-delà ce jour-là (de 12h à 14h, soit 2h) doivent être payées avec majoration. Au minimum **+15 % de la 41e à la 46e heure, et +50 % au-delà** [Art. 25 - Décret n° 2024-898].
 >
-> Donc si ces 3 heures en plus (de 12h à 14h) font dépasser le seuil de 40h/semaine, elles doivent être payées en heures sup. Est-ce que c'est le cas ? Tu sais combien tu fais au total sur la semaine ?
+> **Est-ce que ces 2 heures supplémentaires vous sont payées ?**
 >
-> **Le problème de la pause : 7h sans rien**
+> **2. L'absence de pause — c'est clairement un problème**
 >
-> 7 heures de travail sans aucune pause, c'est problématique. Pour le travail en continu (service de quart, production sans interruption), la loi est claire : **la journée ne peut excéder 8h, pause de 30 minutes minimum incluse** [Art. 11, Décret n° 2024-898]. Aucune pause pendant 7h d'affilée, ça ne tient pas.
+> 7 heures de travail continu (7h-14h) sans aucune pause, c'est une violation. La loi est claire : au-delà de 6 heures de travail ininterrompu, une **demi-heure de pause payée** doit être accordée [Art. 52 - Convention AICI/UGTCI]. Et pour le travail en continu en général, la journée de 8h doit inclure **au moins 30 minutes de pause** [Art. 11 - Décret n° 2024-898].
 >
-> **Ce que je te conseille concrètement :**
+> En résumé, votre employeur vous fait travailler plus longtemps que les autres **sans pause et potentiellement sans majoration**. Ce sont deux irrégularités cumulées.
 >
-> Avant d'aller plus loin, deux questions importantes :
-> 1. Ces heures en plus (7h au lieu de 4h) sont-elles **payées** ou pas du tout compensées ?
-> 2. Tu es dans quelle situation — seul dans ce cas ou c'est tous les salariés de l'imprimerie ?
->
-> Ça va définir la meilleure approche : simple discussion avec les RH, passage par le délégué du personnel, ou autre chose.
+> Avant d'aller plus loin : est-ce que d'autres collègues sont dans la même situation ? Et avez-vous déjà tenté d'en parler à la direction ou à un délégué du personnel ?
 
-**À noter :** plus de "doublement illégal", phrasing conditionnel sur le dépassement, demande explicite des heures totales sur la semaine avant de conclure aux heures sup. Le verdict sur la pause reste (correct selon ton commentaire round-1).
+**À noter :** plus de "doublement illégal", phrasing conditionnel sur le dépassement, demande explicite si les 2 heures sont payées avant de conclure. Le verdict sur la pause s'appuie maintenant sur la CCI 1977 Art. 52 (nouvelle source en corpus) pour le seuil de 6h. Math corrigé : 12h-14h = 2h (pas 3h comme dans la version précédente).
 
 **Verdict Hadi :**
 
@@ -223,13 +213,31 @@ Q17 — "Un CDD peut être renouvelé plusieurs fois ou il y a une limite ?"
 
 ---
 
-## Pas encore prêt pour V&V
-
 ### Q19 — multi_articles (salarié) — "Si mon contrat CDD se termine mais que je continue à travailler après, il devient automatiquement un CDI ?"
 
 **Ce que tu avais flagué :** Laya mentionnait l'indemnité de fin de CDD (3 %) alors que le scénario l'écarte déjà — tokens gaspillés.
 
-**État :** retesté une fois mais Laya mentionnait toujours le 3 % "pour préciser qu'il ne s'applique plus puisque le contrat continue en CDI" — pas assez strict. **Règle renforcée dans `2d93c57`** (ajout explicite "même pour expliquer qu'elle ne s'applique pas"). Re-test à faire une fois le déploiement Vercel actif.
+**Règle renforcée dans `2d93c57`** (ajout explicite "même pour expliquer qu'elle ne s'applique pas").
+
+**Réponse Laya v3 :**
+
+> Bonne question — et oui, c'est exactement ce que prévoit la loi. Laissez-moi vérifier l'article précis. Oui, c'est automatique. Voici comment ça fonctionne :
+>
+> **La règle de base** : tout CDD qui ne respecte pas les conditions légales — ou dont la relation de travail se poursuit après le terme sans nouveau contrat formalisé — est réputé être un CDI [Art. 15.10, Loi n° 2015-532].
+>
+> Concrètement, dès que vous continuez à travailler après la date de fin de votre CDD sans qu'un nouveau contrat (CDD ou CDI) soit signé, la loi considère que les deux parties ont tacitement accepté de poursuivre la relation de travail à durée indéterminée. Ce n'est pas une décision à prendre, c'est une conversion automatique de plein droit.
+>
+> **Ce que ça change pour vous immédiatement :**
+> - Vous bénéficiez de toute la protection attachée au CDI, notamment les règles de licenciement (préavis, motif valable, procédure).
+> - Votre ancienneté court **depuis le début de votre CDD initial**, pas depuis la date de la conversion. Cela compte pour les indemnités et autres droits calculés sur la durée de service.
+>
+> **Du côté de l'employeur**, il ne peut plus mettre fin à la relation comme à la fin d'un CDD — il doit respecter la procédure de licenciement. S'il essaie de vous "laisser partir" comme si le CDD s'était simplement terminé, c'est un licenciement sans procédure, ce qui l'expose à des sanctions.
+>
+> Vous avez une situation précise en tête, ou c'est pour anticiper ?
+
+**À noter :** plus aucune mention de l'indemnité de fin de CDD (3 %) — même pas pour préciser qu'elle ne s'applique pas. La règle `2d93c57` a tenu.
+
+**Verdict Hadi :**
 
 ---
 
