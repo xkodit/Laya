@@ -198,6 +198,10 @@ Read this file first, then `git log --oneline -20` for the latest commits. The c
 
 The bracket→native-citations migration is non-urgent and deferred until eval data justifies the work.
 
+**Tech debt to track separately:**
+
+- **Admin upload — migrate to client-side direct-to-Supabase.** Current path: browser → Server Action → Supabase Storage. Capped by Next.js Server Action body size (raised to 25 MB in `545eb65`) and by the Vercel platform request payload limit (4.5 MB on Hobby). Robust pattern: browser uploads directly to Supabase Storage via `@supabase/ssr` browser client, then calls a tiny Server Action with just the metadata (path, title, ref). Bypasses Vercel platform entirely; file size only capped by Supabase's per-file limit (50 MB default, configurable). Non-blocking — do when corpus expansion (§12) starts demanding bigger files (full Code du Travail re-ingest, jurisprudence collections, etc.).
+
 **Vercel CLI is installed** (`vercel logs --follow`, `vercel env add KEY production`). Project linked to xkodit's Vercel account. Run `vercel link` again only if `.vercel/` is missing.
 
 **Important env-var gotcha:** Vercel env vars are NOT pushed by `git push`. When you add a key to `.env.local`, also add it to Vercel via dashboard or `vercel env add NAME production` and **redeploy** (env changes don't propagate to existing deployments).
