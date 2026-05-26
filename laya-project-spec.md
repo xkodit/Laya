@@ -173,6 +173,20 @@ Built directly from the Hadi-50 + round-2 findings above. Commits in chronologic
 3. Anything MAUVAIS → back into the iteration loop for that axis.
 4. All clean → bottleneck becomes breadth (recruit testers #2/#3 per §12).
 
+### Corpus expansion + ingest pipeline fix (2026-05-26)
+
+Two corpus additions and two infrastructure fixes landed alongside the prompt iteration:
+
+- **Admin upload Server Action body-size limit raised to 25 MB** (`545eb65`) — was failing with "This page couldn't load" on any PDF >1 MB (the Next.js default). Robust fix (client-side direct upload to Supabase) deferred — see *Tech debt* below.
+
+- **Ingest pipeline now auto-OCRs scanned PDFs in `--from-pending` mode** (`6c933ef`) — the OCR path (Claude vision) existed but only fired via the `--ocr` flag in single-PDF mode. Pending-queue mode silently failed with "0 characters → 0 chunks" on scanned PDFs. Now falls back automatically when pdfplumber returns no text. Output cached at `scripts/cache/<stem>.ocr.txt` so re-runs are free.
+
+- **Convention Interprofessionnelle 1977** (AICI / UGTCI) ingested. Was on §14 acquisition targets list — moved into the corpus pre-launch.
+
+- **Décret n° 2024-902 — Obligations des employeurs** ingested (11 chunks, OCR fallback triggered, ~$0.07 in tokens). Not in original §14 lock — new addition. Requires the OCR fix above.
+
+See §14 for current live corpus state.
+
 ### Open non-code actions (Hussein owns — see §12 for detail)
 
 - [x] **Branding** (logo + wordmark + palette) — locked 2026-05-21, see `/branding/brand.md`
@@ -722,13 +736,24 @@ Hussein owns these. Claude reads this section every time the spec is referenced 
 1. **Code du Travail — Loi n° 2015-532 du 20 juillet 2015** (primary, full law) — `is_primary_source = true`
 2. **Décret n° 2024-898 relatif à la durée du travail** (primary, recent supplement) — `is_primary_source = true`
 
+### Currently in corpus (live, 2026-05-26)
+
+The runtime corpus has grown beyond the v1.0 lock. Live state:
+
+| Document | Source type | Classification | Date added |
+|---|---|---|---|
+| Code du Travail — Loi n° 2015-532 | loi | primary | v1.0 lock |
+| Décret n° 2024-898 (durée du travail) | decret | primary | v1.0 lock |
+| Convention Interprofessionnelle 1977 (AICI / UGTCI) | convention | per admin upload | 2026-05-26 |
+| Décret n° 2024-902 (obligations des employeurs) | decret | per admin upload | 2026-05-26 |
+
 ### Held for classification (post-launch ingestion)
 
 Hussein has 7 additional PDFs (Grille Salariale 2023, Barème Salaire Catégoriel, Réforme ITS, Heures Supplémentaires, Les Retenues Sur Salaires, Les Secrets de la Paie 1, Doctrine CNPS). Each must be classified as primary or secondary before ingestion — most are likely commentary handbooks, which means they inform retrieval context but **must not be cited as authority**.
 
 ### Acquisition targets (gaps to fill before public launch ideally)
 
-- Convention Collective Interprofessionnelle (CCI 1977)
+- ~~Convention Collective Interprofessionnelle (CCI 1977)~~ — ✓ ingested 2026-05-26 (see *Currently in corpus* above)
 - Sector conventions collectives (banking, BTP, commerce, hôtellerie, transport)
 - Jurisprudence (Cour Suprême, chambre sociale)
 - Décrets spécifiques (maternité, congés, sécurité sociale détaillée)
