@@ -195,6 +195,17 @@ Multiple corpus additions and infrastructure fixes landed throughout the day alo
 
 See §14 for current live corpus state.
 
+### Cost optimization + English deferral (2026-05-26)
+
+- **Anthropic prompt caching enabled** (`d6716fe`) — `lib/chat/system-prompt.ts` was split into `STATIC_SYSTEM_PROMPT` (const, ~3,500 tokens of persona / methodology / scope / structure rules — no user-specific interpolation) and `buildUserContext(profile)` (small per-user tail with name + role + company). `app/api/chat/route.ts` now sends them as two `system` blocks; the static block carries `providerOptions.anthropic.cacheControl: { type: "ephemeral" }`. Cache key is identical for all users (user data lives in the second non-cached block), so the prefix is cached **globally** across users — Phase B scale benefits from one shared cached prefix rather than per-user. Expected impact: ~90% discount on the ~3,500 system-prompt tokens for any call within the 5-minute TTL window. One-time 25% write premium on the first call after every prompt iteration. Verification: check `cache_read_input_tokens` vs `cache_creation_input_tokens` in Vercel logs or the Anthropic console.
+
+- **English (v1.2) deferral re-affirmed.** Question raised mid-session about moving English earlier in the timeline. Three scopes considered:
+  1. Personal-use only (10-min system-prompt change) — Hussein can chat in English, UI stays French.
+  2. Full English UX (UI strings, profile toggle) — 1–2 days.
+  3. Full v1.2 launch with English eval set + Hadi V&V — 2–4 weeks.
+
+  Decision: hold per spec §3. Reasoning unchanged: corpus is FR-only (citations + quoted legal text stay French regardless of response language), Phase A QA burden doubles with bilingual eval, round-3 V&V packet is FR-focused and still pending Hadi's verdicts. Revisit once FR v3 signs off and Phase A ships.
+
 ### Open non-code actions (Hussein owns — see §12 for detail)
 
 - [x] **Branding** (logo + wordmark + palette) — locked 2026-05-21, see `/branding/brand.md`
