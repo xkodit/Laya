@@ -10,7 +10,7 @@ import { anthropic } from "@ai-sdk/anthropic";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
-import { buildSystemPrompt } from "@/lib/chat/system-prompt";
+import { STATIC_SYSTEM_PROMPT, buildUserContext } from "@/lib/chat/system-prompt";
 import { searchLaborCode, formatChunksForModel } from "@/lib/chat/retrieval";
 
 export const maxDuration = 60;
@@ -176,15 +176,31 @@ export async function POST(req: Request) {
     },
   });
 
-  const systemPrompt = buildSystemPrompt({
+  const userContext = buildUserContext({
     full_name: profile.full_name,
     user_type: profile.user_type,
     company: profile.company,
   });
 
+  // Two system blocks: the static prefix is marked cacheable (Anthropic
+  // prompt caching — ~90% discount on cached reads, 5-minute TTL), and
+  // the per-user tail follows uncached. The static block hits cache
+  // across all users since it has no interpolation.
   const result = streamText({
     model: anthropic(MODEL_ID),
-    system: systemPrompt,
+    system: [
+      {
+        role: "system",
+        content: STATIC_SYSTEM_PROMPT,
+        providerOptions: {
+          anthropic: { cacheControl: { type: "ephemeral" } },
+        },
+      },
+      {
+        role: "system",
+        content: userContext,
+      },
+    ],
     messages: await convertToModelMessages(uiMessages),
     tools: { search_labor_code: searchTool },
     stopWhen: stepCountIs(8),

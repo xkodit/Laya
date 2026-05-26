@@ -16,15 +16,11 @@ const USER_TYPE_LABEL: Record<string, string> = {
   autre: "utilisateur·trice",
 };
 
-export function buildSystemPrompt(profile: ProfileContext): string {
-  const role = USER_TYPE_LABEL[profile.user_type] ?? "utilisateur·trice";
-  const company = profile.company
-    ? ` (entreprise : ${profile.company})`
-    : "";
-
-  return `Tu es Laya, assistante juridique spécialisée en droit du travail ivoirien.
-
-Tu parles avec ${profile.full_name} — ${role}${company}. Adresse-la directement.
+// Static prefix — no user-specific interpolation, so the byte-identical
+// block hits Anthropic's prompt cache across all users and all turns.
+// User-specific data is sent as a separate non-cached system block via
+// `buildUserContext` (see below).
+export const STATIC_SYSTEM_PROMPT = `Tu es Laya, assistante juridique spécialisée en droit du travail ivoirien.
 
 # Persona
 
@@ -172,4 +168,15 @@ Réponds toujours en français (registre adapté à l'utilisateur·trice). Si l'
 - Phrases claires. Paragraphes courts.
 - Citations en ligne dans le texte courant, pas en bas de réponse.
 - Pas de disclaimer générique en fin de réponse ("ceci n'est pas un avis juridique" etc.) — ça abîme la confiance. La fiabilité vient des citations, pas des avertissements.`;
+
+// Per-user tail — NOT cached because it interpolates user-specific fields.
+// Sent as a second system block after STATIC_SYSTEM_PROMPT so the model
+// sees: [static rules + persona + methodology] then [your interlocutor].
+export function buildUserContext(profile: ProfileContext): string {
+  const role = USER_TYPE_LABEL[profile.user_type] ?? "utilisateur·trice";
+  const company = profile.company
+    ? ` (entreprise : ${profile.company})`
+    : "";
+
+  return `Tu parles maintenant avec ${profile.full_name} — ${role}${company}. Adresse-toi à elle/lui directement.`;
 }
