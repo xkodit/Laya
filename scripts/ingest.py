@@ -79,9 +79,10 @@ HIERARCHY_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
 ]
 
 # Article heading. Matches "Article 12", "Article 12.7", "Art. 12",
-# "Article L.16-7", "Article L 16.7", etc.
+# "Article L.16-7", "Article L 16.7", "Art.1.-" (no space, with trailing
+# punctuation), etc.
 ARTICLE_RE = re.compile(
-    r"^(?:Article|Art\.?)\s+"           # marker
+    r"^(?:Article|Art\.?)\s*"           # marker (whitespace optional — some PDFs glue "Art.1")
     r"(L\.?\s*)?"                       # optional L. prefix
     r"(\d+(?:[.\-]\d+)*)"               # number with optional .sub or -sub
     r"\b",
@@ -286,13 +287,18 @@ def iter_articles(text: str) -> Iterator[tuple[str | None, str | None, str]]:
         if m:
             yield from flush()
             current_body = []
-            # Normalize: strip the leading marker for cleaner article_ref.
-            raw = m.group(0)
-            num_part = raw.split(None, 1)[-1] if " " in raw else raw
-            current_article = f"Art. {num_part}".replace("  ", " ").strip()
+            # Build "Art. N" (or "Art. L.N") from the captured groups —
+            # more robust than whitespace-splitting m.group(0), which broke
+            # on PDFs that glue the marker and number ("Art.1.-").
+            num = m.group(2)
+            l_prefix = m.group(1)
+            current_article = f"Art. L.{num}" if l_prefix else f"Art. {num}"
             current_section = parent_section_label(hierarchy)
-            # Keep the rest of the line (after the heading) as content.
+            # Keep the rest of the line as body, after trimming the trailing
+            # punctuation that often follows the heading marker
+            # (e.g., ".- " in "Art.1.- Un règlement…").
             tail = line[m.end():].strip()
+            tail = re.sub(r"^[.\-\s]+", "", tail).strip()
             if tail:
                 current_body.append(tail)
             continue
