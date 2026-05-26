@@ -15,7 +15,7 @@ import { searchLaborCode, formatChunksForModel } from "@/lib/chat/retrieval";
 
 export const maxDuration = 60;
 
-const MODEL_ID = "claude-haiku-4-5-20251001";
+const MODEL_ID = "claude-sonnet-4-6";
 
 type DbMessage = {
   id: string;
