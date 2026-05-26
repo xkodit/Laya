@@ -531,6 +531,14 @@ def process_one_pending(supabase: Client, doc: dict) -> bool:
         text = normalize_whitespace(raw)
         print(f"  → {len(text):,} characters after normalization")
 
+        # Scanned PDF: pdfplumber found no extractable text. Fall back to
+        # Claude vision OCR — same path the single-PDF mode uses via --ocr.
+        if not text.strip():
+            print("  → no extractable text; falling back to Claude vision OCR…")
+            raw = extract_text_via_vision(local_path)
+            text = normalize_whitespace(raw)
+            print(f"  → {len(text):,} characters after OCR + normalization")
+
         articles = list(iter_articles(text))
         chunks = build_chunks(articles)
         print(
