@@ -173,17 +173,25 @@ Built directly from the Hadi-50 + round-2 findings above. Commits in chronologic
 3. Anything MAUVAIS → back into the iteration loop for that axis.
 4. All clean → bottleneck becomes breadth (recruit testers #2/#3 per §12).
 
-### Corpus expansion + ingest pipeline fix (2026-05-26)
+### Corpus expansion + ingest pipeline fixes (2026-05-26)
 
-Two corpus additions and two infrastructure fixes landed alongside the prompt iteration:
+Multiple corpus additions and infrastructure fixes landed throughout the day alongside the prompt iteration:
 
 - **Admin upload Server Action body-size limit raised to 25 MB** (`545eb65`) — was failing with "This page couldn't load" on any PDF >1 MB (the Next.js default). Robust fix (client-side direct upload to Supabase) deferred — see *Tech debt* below.
 
 - **Ingest pipeline now auto-OCRs scanned PDFs in `--from-pending` mode** (`6c933ef`) — the OCR path (Claude vision) existed but only fired via the `--ocr` flag in single-PDF mode. Pending-queue mode silently failed with "0 characters → 0 chunks" on scanned PDFs. Now falls back automatically when pdfplumber returns no text. Output cached at `scripts/cache/<stem>.ocr.txt` so re-runs are free.
 
+- **Ingest pipeline regex now handles `Art.1.-` format** (`2fc2cbe`) — Décret n°96-197 (Règlement intérieur entreprises) failed ingest with "1 article segment → 0 chunks" because its article markers use the format `Art.1.- Un règlement intérieur…` with no whitespace between marker and digit, plus trailing `.-` noise. ARTICLE_RE required `\s+`; relaxed to `\s*`, and `current_article` is now built from captured groups instead of whitespace-splitting `m.group(0)`. Leading punctuation in the body tail is also stripped.
+
 - **Convention Interprofessionnelle 1977** (AICI / UGTCI) ingested. Was on §14 acquisition targets list — moved into the corpus pre-launch.
 
-- **Décret n° 2024-902 — Obligations des employeurs** ingested (11 chunks, OCR fallback triggered, ~$0.07 in tokens). Not in original §14 lock — new addition. Requires the OCR fix above.
+- **Décret n° 2024-902 — Obligations des employeurs** ingested (11 chunks, OCR fallback triggered, ~$0.07 in tokens). Not in original §14 lock — new addition. Required the OCR fix above.
+
+- **Code de Prévoyance Sociale (CIV-57048)** ingested — 94 pages, 206 chunks. Text-based PDF, no OCR needed.
+
+- **Décret n°96-197 — Règlement intérieur entreprises** ingested — 21 articles. Required the regex fix above.
+
+**End-to-end validation (2026-05-26):** test query *"Qui rédige le règlement intérieur d'une entreprise ?"* triggered cross-document synthesis — Laya cited `[Art. 4]`, `[Art. 13]`, `[Art. 15]` from the new Décret n°96-197 plus `[Art. 16.1]` from the existing Code du Travail. Badge clicks resolved to the correct article text in the side panel. Citation UI fix (`a6b25c1`) + regex fix (`2fc2cbe`) + retrieval pipeline (§7.2) all working together.
 
 See §14 for current live corpus state.
 
@@ -746,6 +754,8 @@ The runtime corpus has grown beyond the v1.0 lock. Live state:
 | Décret n° 2024-898 (durée du travail) | decret | primary | v1.0 lock |
 | Convention Interprofessionnelle 1977 (AICI / UGTCI) | convention | per admin upload | 2026-05-26 |
 | Décret n° 2024-902 (obligations des employeurs) | decret | per admin upload | 2026-05-26 |
+| Code de Prévoyance Sociale (CIV-57048) | loi | per admin upload | 2026-05-26 |
+| Décret n° 96-197 (règlement intérieur entreprises) | decret | per admin upload | 2026-05-26 |
 
 ### Held for classification (post-launch ingestion)
 
