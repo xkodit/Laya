@@ -12,6 +12,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { STATIC_SYSTEM_PROMPT, buildUserContext } from "@/lib/chat/system-prompt";
 import { searchLaborCode, formatChunksForModel } from "@/lib/chat/retrieval";
+import { validateCitations } from "@/lib/chat/citations-validator";
 
 export const maxDuration = 60;
 
@@ -218,8 +219,37 @@ export async function POST(req: Request) {
       // beyond that index is new. We let Postgres assign uuids (the AI SDK's
       // own ids aren't uuids and would clash with the column's uuid type).
       const priorCount = priorRows?.length ?? 0;
-      const toInsert = messages
-        .slice(priorCount)
+      const newMessages = messages.slice(priorCount);
+
+      // Citation validation: walk the final assistant text and check that
+      // every `[Art. X]` / `[Loi …]` / `[Décret …]` bracket resolves to a
+      // chunk retrieved in this turn. Pure logging for now — the data
+      // shows whether fabrication is happening in production. Aggregates
+      // chunks across all new assistant messages so multi-step tool
+      // calling doesn't trigger false positives.
+      const turnChunks: ReturnType<typeof extractCitedChunks> = [];
+      for (const m of newMessages) {
+        if (m.role === "assistant") turnChunks.push(...extractCitedChunks(m));
+      }
+      let lastAssistantText = "";
+      for (let i = newMessages.length - 1; i >= 0; i--) {
+        if (newMessages[i].role === "assistant") {
+          lastAssistantText = extractText(newMessages[i]);
+          break;
+        }
+      }
+      if (lastAssistantText.length > 0) {
+        const report = validateCitations(lastAssistantText, turnChunks);
+        if (report.unmatched.length > 0) {
+          console.warn(
+            `[chat] citation-fabrication conversation=${conversationId} ` +
+              `unmatched=${report.unmatched.length}/${report.total} ` +
+              `labels=${JSON.stringify(report.unmatched)}`,
+          );
+        }
+      }
+
+      const toInsert = newMessages
         .map((m) => ({
           conversation_id: conversationId,
           role: m.role,
