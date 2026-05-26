@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ThumbsUp, ThumbsDown, Flag, Loader2 } from "lucide-react";
+import { ThumbsUp, ThumbsDown, Flag, Loader2, Copy, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   Dialog,
@@ -29,17 +29,30 @@ export function MessageActions({
   conversationId,
   messageIndex,
   initial,
+  text,
   onChange,
 }: {
   conversationId: string;
   messageIndex: number;
   initial: FeedbackState;
+  text: string;
   onChange?: (next: FeedbackState) => void;
 }) {
   const [state, setState] = useState<FeedbackState>(initial);
   const [busy, setBusy] = useState<"up" | "down" | "report" | null>(null);
   const [reportOpen, setReportOpen] = useState(false);
   const [reportComment, setReportComment] = useState("");
+  const [copied, setCopied] = useState(false);
+
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Clipboard write can fail in restricted contexts — silently no-op.
+    }
+  }
 
   function commit(next: FeedbackState) {
     setState(next);
@@ -83,6 +96,22 @@ export function MessageActions({
   return (
     <>
       <div className="mt-1 flex items-center gap-0.5">
+        <button
+          type="button"
+          onClick={handleCopy}
+          aria-label={copied ? "Réponse copiée" : "Copier la réponse"}
+          title={copied ? "Copié !" : "Copier la réponse"}
+          className={cn(
+            "grid size-7 place-items-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground",
+            copied && "text-primary",
+          )}
+        >
+          {copied ? (
+            <Check className="size-3.5" />
+          ) : (
+            <Copy className="size-3.5" />
+          )}
+        </button>
         <button
           type="button"
           onClick={() => handleRating("up")}

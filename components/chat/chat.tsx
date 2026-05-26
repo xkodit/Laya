@@ -257,6 +257,7 @@ function MessageBubble({
           conversationId={conversationId}
           messageIndex={messageIndex}
           initial={initialFeedback}
+          text={text}
         />
       ) : null}
     </div>
