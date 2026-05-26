@@ -6,7 +6,7 @@ import {
   stepCountIs,
   type UIMessage,
 } from "ai";
-import { mistral } from "@ai-sdk/mistral";
+import { anthropic } from "@ai-sdk/anthropic";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
@@ -15,7 +15,7 @@ import { searchLaborCode, formatChunksForModel } from "@/lib/chat/retrieval";
 
 export const maxDuration = 60;
 
-const MODEL_ID = "mistral-medium-latest";
+const MODEL_ID = "claude-sonnet-4-6";
 
 type DbMessage = {
   id: string;
@@ -182,16 +182,19 @@ export async function POST(req: Request) {
     company: profile.company,
   });
 
-  // Mistral provider has no equivalent to Anthropic's ephemeral prompt
-  // cache, so both system blocks are uncached. The structural split
-  // (static prefix + per-user tail) is kept so a revert to Anthropic
-  // re-enables caching with a one-line change.
+  // Two system blocks: the static prefix is marked cacheable (Anthropic
+  // prompt caching — ~90% discount on cached reads, 5-minute TTL), and
+  // the per-user tail follows uncached. The static block hits cache
+  // across all users since it has no interpolation.
   const result = streamText({
-    model: mistral(MODEL_ID),
+    model: anthropic(MODEL_ID),
     system: [
       {
         role: "system",
         content: STATIC_SYSTEM_PROMPT,
+        providerOptions: {
+          anthropic: { cacheControl: { type: "ephemeral" } },
+        },
       },
       {
         role: "system",
