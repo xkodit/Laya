@@ -5,7 +5,7 @@
 
 ---
 
-## 0. Status (as of 2026-05-25)
+## 0. Status (as of 2026-05-26)
 
 **Decision: GO.** Branding locked, all architectural decisions locked. Coding underway since 2026-05-22.
 
@@ -20,9 +20,9 @@
 - [x] **Week 2–3: Local Python ingestion** — `scripts/ingest.py` with article-aware chunking, Voyage `voyage-3` embeddings, Claude vision OCR fallback for scanned PDFs, corpus storage bucket. `--from-pending` mode drains admin-uploaded documents. Two launch PDFs ingested. `match_chunks` RPC + smoke-test script proves vector retrieval returns sane results.
 - [x] **Profile + admin moderation** (week 6–7 work pulled forward) — `/profile` page with edit, change-password, account delete; admin views for documents, users, conversations, feedback.
 - [x] **Week 3–5: Streaming chat with tool-calling agent** — done in v1 form (commit `cc0402e`). See *Chat implementation snapshot* below for what's in and what's deferred.
-- [~] **Week 5–6: Eval set (50 Q&A) + runner** — brief + template shipped (commit `ce18cd4`). First tester (admin@kodit.ai friend) returned **11/50** on 2026-05-24, then a full **50/50 V&V pass on 2026-05-25** (41 OK / 8 MAUVAIS / 1 blank-counted-OK) — see *Full V&V — Hadi's 50-question pass* below. Runner still deferred until ≥25 filled rows from ≥2 testers.
+- [~] **Week 5–6: Eval set (50 Q&A) + runner** — brief + template shipped (commit `ce18cd4`). First tester (admin@kodit.ai friend) returned **11/50** on 2026-05-24, then a full **50/50 V&V pass on 2026-05-25** (41 OK / 8 MAUVAIS / 1 blank-counted-OK) — see *Full V&V — Hadi's 50-question pass* below. Round-3 V&V packet sent to Hadi 2026-05-26 (`eval/round-3-prompt-iteration-2026-05-26.md`) — see *Prompt iteration v3* below. Runner still deferred until ≥25 filled rows from ≥2 testers.
 - [~] **Week 6–7: Conversation CRUD (favorite, delete, copy, PDF) + sliding-window summarization** — favorite/rename/copy/PDF/Word/delete shipped via sidebar kebab menu 2026-05-24 (commits `05e9aff` + `83713c0`). Sliding-window summarization still not built.
-- [x] **Week 7–8: In-chat thumbs/report** — shipped 2026-05-24 (commit `7cc36fa`). Red-team prompt tuning not started.
+- [x] **Week 7–8: In-chat thumbs/report** — shipped 2026-05-24 (commit `7cc36fa`); per-message copy-to-clipboard added 2026-05-26 (`b5349c8`). Eval-driven prompt tuning v3 done 2026-05-26 (commits `31ffbb1` + `1fd082e` + `2d93c57`) — see *Prompt iteration v3* below.
 - [ ] **Week 8+: Open closed beta** — gated on the above.
 
 ### Chat implementation snapshot (commit `cc0402e`, 2026-05-23)
@@ -133,7 +133,45 @@ Both are the **infer-vs-assume axis** Hadi flagged in round-2: "clarify before v
 
 **Note on reading Hadi's commentary:** he writes the *logic* behind the verdict, not letter-perfect rules. Apply the principle, not a literal patch.
 
-**Status of the `f976063` prompt tune:** **not validated.** The "clarify before verdict" axis works on questions where the answer hinges on a missing variable, but breaks when Laya commits to a fact (Q21 demi-journée, Q23 water source) that should have been confirmed. Next prompt iteration must cover: signal-inference (don't ask redundantly when the question pins the variable — round-2 finding), assumption-naming (when committing to a fact, say so explicitly — Q21/Q23 finding), scope discipline (Q19), capability honesty (Q40), structure-rule of standard-before-exception (Q4).
+**Status of the `f976063` prompt tune:** **superseded by `31ffbb1` + `1fd082e` + `2d93c57`** — see *Prompt iteration v3* below. Historical detail kept for the audit trail: the "clarify before verdict" axis worked on questions where the answer hinges on a missing variable, but broke when Laya committed to a fact (Q21 demi-journée, Q23 water source) that should have been confirmed. The next prompt iteration had to cover: signal-inference (don't ask redundantly when the question pins the variable — round-2 finding), assumption-naming (when committing to a fact, say so explicitly — Q21/Q23 finding), scope discipline (Q19), capability honesty (Q40), structure-rule of standard-before-exception (Q4).
+
+### Prompt iteration v3 — 6 rules + UI fixes (2026-05-26)
+
+Built directly from the Hadi-50 + round-2 findings above. Commits in chronological order:
+
+- `a6b25c1` (2026-05-25) — citation-rendering code fix (per-message chunk scoping + strict article-prefix hierarchy + doc-alias map). Already detailed above.
+- `b5349c8` (2026-05-26) — UI: per-message copy-to-clipboard button on each Laya response. Quality-of-life for round-tripping transcripts to Hadi (`components/chat/message-actions.tsx`, `components/chat/chat.tsx`).
+- `31ffbb1` (2026-05-26) — six new rules added to `lib/chat/system-prompt.ts`:
+  1. **Signal inference** — if the question's surface text pins the variable (e.g. "fin de contrat" → CDD), state the assumption explicitly, don't re-ask. Round-2 lesson.
+  2. **Assumption-naming before verdict** — when Laya is about to declare an illegality on an unverified factual basis (demi-journée = 4h, water = non-potable), she must EITHER confirm the fact with one targeted question OR explicitly state the hypothesis. No verdict on an unverified fact. (Q21, Q23.)
+  3. **Discipline de portée** — only mention an article if it applies to the case. (Q19.)
+  4. **Capability honesty** — Laya does NOT have sector conventions collectives or jurisprudence in her corpus. Never offer "je vais regarder votre convention" — redirect to RH / délégué / DGT / avocat. (Q40.)
+  5. **Standard-before-exception** — règle générale d'abord, exception ensuite. (Q4.)
+  6. **Bad-intent reframe** — when a question signals discriminatory intent toward a protected category, name the issue politely + offer a lawful pivot. Stronger than §6.4's "add counterparty context". (Round-2 Q51.)
+
+- `1fd082e` (2026-05-26) — promoted rule 5 from a bullet in "Format de réponse" to its own dedicated section ("Structure d'explication — règle générale puis exception") with the contrat-écrit case as the explicit pattern. First Q4 retest showed the bullet form wasn't load-bearing — Laya still led with the CDI verbal exception. The promoted version produced explicit "La règle générale" / "L'exception" headers in the response.
+
+- `2d93c57` (2026-05-26) — tightened rule 3 (Discipline de portée). First Q19 retest saw Laya mention the 3 % indemnité de fin de CDD only to negate it ("ne serait plus due puisque le contrat continue"). Added explicit clause: "même pour expliquer qu'elle ne s'applique pas".
+
+- `852d523` (2026-05-26) — V&V packet for Hadi at `eval/round-3-prompt-iteration-2026-05-26.md`. Bundles the new transcripts (Q4 + Q21 3-msg + Q23 + Q40) plus Hussein's citation-badge clicks (Q9 + Q17) into one file with per-question "Verdict Hadi :" slots. Sent to admin@kodit.ai by mail 2026-05-26.
+
+**Hussein-preliminary verdicts** (NOT validated — only Hadi's V&V counts, per [[feedback_eval_signoff]]):
+
+| Item | Prelim |
+|---|---|
+| Q4 — standard-before-exception | ✓ PASSED |
+| Q9 / Q10 (= Q9) / Q17 — citation UI | ✓ PASSED (badge clicks verified) |
+| Q21 — assumption-naming (3-msg) | ✓ PASSED with caveat ("c'est clairement du dépassement" still leans verdict-y; rescued by the conditional "Si ta 'demi-journée'…" framing) |
+| Q23 — assumption-naming (water source) | ✓ PASSED |
+| Q40 — capability honesty | ✓ PASSED |
+| Q19 — scope discipline (post-`2d93c57`) | RE-TEST PENDING |
+
+**What's open:**
+
+1. **Q19 re-test in deployed UI** — fresh chat, CDD-continuation question, verify Laya doesn't mention the 3 % indemnité at all (not even to negate it).
+2. **Hadi's V&V verdicts** on the round-3 packet. His response is the gate.
+3. Anything MAUVAIS → back into the iteration loop for that axis.
+4. All clean → bottleneck becomes breadth (recruit testers #2/#3 per §12).
 
 ### Open non-code actions (Hussein owns — see §12 for detail)
 
@@ -152,18 +190,11 @@ Read this file first, then `git log --oneline -20` for the latest commits. The c
 
 **Most likely next slice (in order of priority):**
 
-1. **Hadi V&V retest of the article-citation fix** — Q9, Q10, Q17 in the live UI. Code change is in `components/chat/{answer-renderer,chat}.tsx` + `app/chat/[id]/page.tsx`; mechanically the lookup is now per-message and the doc-alias substring leak is closed, but the regression-proof is Hadi clicking the badges and seeing the right article text.
-2. **Iterate the system prompt** with all round-2 + Hadi-50 findings folded in. Rules to add to `lib/chat/system-prompt.ts`:
-   - **Signal inference** — if the question's surface text pins down the variable (e.g. "fin de contrat" / "X mois restants" / "prime de fin" → CDD), state the assumption explicitly and proceed; don't ask a redundant question.
-   - **Assumption-naming before legal commitment** (Q21/Q23) — when Laya is about to declare a violation or commit to a legal conclusion built on a factual assumption (demi-journée = 4h, water = non-potable, etc.), she must either confirm the fact with one targeted question OR state the assumption explicitly. No verdict built on an unverified fact.
-   - **Scope discipline** (Q19) — only mention an article when it applies to the case at hand. If the question already excludes the scenario (e.g. "I continued working after my CDD"), don't volunteer the alternative case's law (indemnité de fin de contrat).
-   - **Capability honesty** (Q40) — Laya does not have sector conventions collectives. Never offer to "look up" the convention; redirect to DGT / délégué du personnel / RH.
-   - **Standard-before-exception** (Q4) — explain the rule first, then the exception. Not the other way around.
-   - **Bad-intent reframe** (carried from round-2) — when a question signals discriminatory intent toward a protected category, name the issue politely *and* offer a lawful pivot.
-3. **Re-run round-2 + Q21/Q23 + Q4/Q19/Q40 against the new prompt**, send Hadi the new transcripts for V&V signoff before declaring anything closed.
-4. **Recruit testers #2 and #3** (5–7 names across personas) — once Hadi signs off, the bottleneck becomes breadth. Need ≥25 filled rows from 2+ testers to unblock the runner (per `eval/README.md`). Also covers the §12 "Beta tester pipeline" item.
-5. **Sliding-window summarization** (spec §7.4) — schema exists, summarizer job doesn't. Becomes visible as soon as testers run conversations past ~20 turns.
-6. **Closed-beta open** (week 8+) — once testers #2/#3 have run a full pass, expand allowlist per §13.
+1. **Q19 re-test in the deployed UI** — fresh chat, CDD-continuation question, verify Laya doesn't mention the 3 % indemnité at all (not even to negate it). Smallest remaining piece of the v3 iteration. Code change in `lib/chat/system-prompt.ts` (commit `2d93c57`).
+2. **Wait for Hadi's V&V verdicts** on the round-3 packet (`eval/round-3-prompt-iteration-2026-05-26.md`, sent 2026-05-26). His response is the gate for declaring v3 validated. Anything MAUVAIS → that axis goes back into the iteration loop.
+3. **Recruit testers #2 and #3** (5–7 names across personas) — once Hadi signs off, the bottleneck becomes breadth. Need ≥25 filled rows from 2+ testers to unblock the runner (per `eval/README.md`). Also covers the §12 "Beta tester pipeline" item.
+4. **Sliding-window summarization** (spec §7.4) — schema exists, summarizer job doesn't. Becomes visible as soon as testers run conversations past ~20 turns.
+5. **Closed-beta open** (week 8+) — once testers #2/#3 have run a full pass, expand allowlist per §13.
 
 The bracket→native-citations migration is non-urgent and deferred until eval data justifies the work.
 
