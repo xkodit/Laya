@@ -22,7 +22,7 @@
 - [x] **Week 3–5: Streaming chat with tool-calling agent** — done in v1 form (commit `cc0402e`). See *Chat implementation snapshot* below for what's in and what's deferred.
 - [~] **Week 5–6: Eval set (50 Q&A) + runner** — brief + template shipped (commit `ce18cd4`). First tester (admin@kodit.ai friend) returned **11/50** on 2026-05-24, then a full **50/50 V&V pass on 2026-05-25** (41 OK / 8 MAUVAIS / 1 blank-counted-OK) — see *Full V&V — Hadi's 50-question pass* below. Round-3 V&V packet sent to Hadi 2026-05-26 (`eval/round-3-prompt-iteration-2026-05-26.md`) — see *Prompt iteration v3* below. Runner still deferred until ≥25 filled rows from ≥2 testers.
 - [~] **Week 6–7: Conversation CRUD (favorite, delete, copy, PDF) + sliding-window summarization** — favorite/rename/copy/PDF/Word/delete shipped via sidebar kebab menu 2026-05-24 (commits `05e9aff` + `83713c0`). Sliding-window summarization still not built.
-- [x] **Week 7–8: In-chat thumbs/report** — shipped 2026-05-24 (commit `7cc36fa`); per-message copy-to-clipboard added 2026-05-26 (`b5349c8`). Eval-driven prompt tuning v3 done 2026-05-26 (commits `31ffbb1` + `1fd082e` + `2d93c57`) — see *Prompt iteration v3* below.
+- [x] **Week 7–8: In-chat thumbs/report** — shipped 2026-05-24 (commit `7cc36fa`); per-message copy-to-clipboard added 2026-05-26 (`b5349c8`). Eval-driven prompt tuning v3 done 2026-05-26 (commits `31ffbb1` + `1fd082e` + `2d93c57` + `d95fbd9`) — see *Prompt iteration v3* below. **Hadi-validated 2026-05-26** on the refreshed round-3 packet — all 7 axes ✓ OK.
 - [ ] **Week 8+: Open closed beta** — gated on the above.
 
 ### Chat implementation snapshot (commit `cc0402e`, 2026-05-23)
@@ -155,22 +155,20 @@ Built directly from the Hadi-50 + round-2 findings above. Commits in chronologic
 
 - `852d523` (2026-05-26) — V&V packet for Hadi at `eval/round-3-prompt-iteration-2026-05-26.md`. Bundles the new transcripts (Q4 + Q21 3-msg + Q23 + Q40) plus Hussein's citation-badge clicks (Q9 + Q17) into one file with per-question "Verdict Hadi :" slots. Sent to admin@kodit.ai by mail 2026-05-26.
 
-**Hussein-preliminary verdicts** (NOT validated — only Hadi's V&V counts, per [[feedback_eval_signoff]]):
+**Verdicts — Hadi-validated 2026-05-26** (per [[feedback_eval_signoff]]):
 
-| Item | Prelim |
+| Item | Verdict |
 |---|---|
-| Q4 — standard-before-exception | ✓ PASSED |
-| Q9 / Q10 (= Q9) / Q17 — citation UI | ✓ PASSED (badge clicks verified) |
-| Q21 — assumption-naming (3-msg) | ✓ PASSED with caveat ("c'est clairement du dépassement" still leans verdict-y; rescued by the conditional "Si ta 'demi-journée'…" framing) |
-| Q23 — assumption-naming (water source) | ✓ PASSED |
-| Q40 — capability honesty | ✓ PASSED |
-| Q19 — scope discipline (post-`2d93c57`) | ✓ PASSED (validated 2026-05-26 soir — see *Haiku experiment + Sonnet validation complete* below) |
+| Q4 — standard-before-exception | ✓ OK (Hadi) |
+| Q9 / Q10 (= Q9) / Q17 — citation UI | ✓ OK (Hadi) |
+| Q21 — assumption-naming (3-msg) | ✓ OK (Hadi) |
+| Q23 — assumption-naming (water source) | ✓ OK (Hadi) |
+| Q40 — capability honesty | ✓ OK (Hadi) |
+| Q19 — scope discipline (post-`2d93c57`) | ✓ OK (Hadi) |
 
-**What's open:**
+**Status: v3 officially validated.** All 7 axes signed off by Hadi on the refreshed round-3 packet. The 8 original MAUVAIS items from Hadi-50 are now closed.
 
-1. **Hadi's V&V verdicts** on the round-3 packet. His response is the gate.
-2. Anything MAUVAIS → back into the iteration loop for that axis.
-3. All clean → bottleneck becomes breadth (recruit testers #2/#3 per §12).
+**Next gate:** breadth. Need ≥25 filled eval rows from 2+ testers to unblock the runner (per `eval/README.md`), and §10's beta-open bar requires 5 hand-picked testers across personas. Hadi counts as #1 — need 4 more.
 
 ### Corpus expansion + ingest pipeline fixes (2026-05-26)
 
@@ -217,20 +215,20 @@ Cost-driven test of Haiku 4.5 as Sonnet 4.6's replacement. Result: **not viable 
 
 **Pattern observed:** out of 5 axes re-tested on Haiku, 2 passed cleanly (Q19, Q23), 1 passed only after the `d95fbd9` hardening (Q4), 1 was borderline (Q40 — bare `[Art. 56]` with no doc qualifier, possibly misattributing CCI 1977 as general law), and 1 hard-failed with fabricated content (Q21). Extrapolating to the 50-question set: 8–15 MAUVAIS expected — worse than the 8/50 Sonnet baseline that v3 was designed to fix.
 
-**Sonnet 4.6 validation complete on the current build** (all of today's prompt iterations + the `d95fbd9` hardening + prompt caching from `d6716fe` + corpus expansion): all 7 axes pass preliminary tests.
+**Sonnet 4.6 validation complete on the current build** (all of today's prompt iterations + the `d95fbd9` hardening + prompt caching from `d6716fe` + corpus expansion): all 7 axes pass.
 
-| Axis | Preliminary verdict |
+| Axis | Verdict |
 |---|---|
-| Q4 — standard-before-exception (post-`d95fbd9`) | ✓ PASSED |
-| Q9 / Q10 / Q17 — citation UI | ✓ PASSED (badge clicks earlier today) |
-| Q19 — scope discipline (post-`2d93c57`) | ✓ PASSED (no 3 % indemnité mention) |
-| Q21 — assumption-naming (3-msg, post-corpus-expansion) | ✓ PASSED (uses CCI 1977 Art. 52 for the 6h pause threshold, math corrected, no "doublement illégal" verdict) |
-| Q23 — water source assumption | ✓ PASSED |
-| Q40 — capability honesty | ✓ PASSED |
+| Q4 — standard-before-exception (post-`d95fbd9`) | ✓ OK (Hadi-validated 2026-05-26) |
+| Q9 / Q10 / Q17 — citation UI | ✓ OK (Hadi-validated 2026-05-26) |
+| Q19 — scope discipline (post-`2d93c57`) | ✓ OK (Hadi-validated 2026-05-26) |
+| Q21 — assumption-naming (3-msg, post-corpus-expansion) | ✓ OK (Hadi-validated 2026-05-26) |
+| Q23 — water source assumption | ✓ OK (Hadi-validated 2026-05-26) |
+| Q40 — capability honesty | ✓ OK (Hadi-validated 2026-05-26) |
 
 **V&V packet refreshed in `e9ee36b`** with the latest transcripts: Q4 (post-`d95fbd9`), Q21 (post-corpus, CCI-enriched), Q19 (newly added, was previously pending). Header notes the corpus state change + brief explanation of the Haiku detour for Hadi's context. Path stays `eval/round-3-prompt-iteration-2026-05-26.md`.
 
-**Path forward:** Hadi's V&V verdicts are the next gate. If clean → v3 is officially validated and Phase A advances toward closed-beta tester expansion. If any axis comes back MAUVAIS → that axis goes back into the iteration loop.
+**Hadi V&V result (2026-05-26):** ✓ OK on all 7 axes. The 8 MAUVAIS from the original Hadi-50 are now closed. v3 is officially the validated baseline for the rest of Phase A.
 
 **Cost path (deferred):** Haiku 4.5 ruled out. Real options for Phase B viability — Pro-tier pricing bump (5,000 → 10,000–15,000 XOF), quota reduction (300 → 100 msgs/mo), Mistral Medium 3 eval (French-native, EU-hosted, ~7× cheaper than Sonnet, unknown on the 6 Hadi rules), or architectural cuts (top-6 → top-4 chunks, `stepCountIs(8)` → `stepCountIs(5)`, sliding-window summarization §7.4). Not blocking Phase A.
 
@@ -251,11 +249,12 @@ Read this file first, then `git log --oneline -20` for the latest commits. The c
 
 **Most likely next slice (in order of priority):**
 
-1. **Wait for Hadi's V&V verdicts** on the refreshed round-3 packet (`eval/round-3-prompt-iteration-2026-05-26.md`, last refresh in `e9ee36b`). His response is the gate for declaring v3 validated. Anything MAUVAIS → that axis goes back into the iteration loop.
-2. **Recruit testers #2 and #3** (5–7 names across personas) — once Hadi signs off, the bottleneck becomes breadth. Need ≥25 filled rows from 2+ testers to unblock the runner (per `eval/README.md`). Also covers the §12 "Beta tester pipeline" item.
-3. **Sliding-window summarization** (spec §7.4) — schema exists, summarizer job doesn't. Becomes visible as soon as testers run conversations past ~20 turns. Doubles as a Phase B cost lever.
-4. **Closed-beta open** (week 8+) — once testers #2/#3 have run a full pass, expand allowlist per §13.
-5. **Phase B cost path** — Pro-tier pricing bump, quota cut, Mistral Medium 3 eval, or architectural cuts (top-6 → top-4 chunks, step-cap reduction). Not blocking Phase A but needs a decision before Phase B launch — current Sonnet 4.6 cost (~$0.07/turn) doesn't break even on the spec §9 Pro tier (5,000 XOF / 300 msgs).
+v3 prompt is Hadi-validated as of 2026-05-26. Bottleneck shifts from code to breadth.
+
+1. **Recruit testers #2 through #5+** (5–7 names across personas — salarié, RH, dirigeant, avocat, friends per §10). Hadi counts as tester #1. Need ≥25 filled eval rows from 2+ testers to unblock the runner (per `eval/README.md`), and the §10 beta-open bar wants 5 testers saying *"yes I'd use this"* after 10 min. Also covers the §12 "Beta tester pipeline" item.
+2. **Sliding-window summarization** (spec §7.4) — schema exists, summarizer job doesn't. Becomes visible as soon as testers run conversations past ~20 turns. Doubles as a Phase B cost lever.
+3. **Closed-beta open** (week 8+) — once testers #2–#5 have run a full pass, expand allowlist per §13.
+4. **Phase B cost path** — Pro-tier pricing bump, quota cut, Mistral Medium 3 eval, or architectural cuts (top-6 → top-4 chunks, step-cap reduction). Not blocking Phase A but needs a decision before Phase B launch — current Sonnet 4.6 cost (~$0.07/turn) doesn't break even on the spec §9 Pro tier (5,000 XOF / 300 msgs).
 
 The bracket→native-citations migration is non-urgent and deferred until eval data justifies the work.
 

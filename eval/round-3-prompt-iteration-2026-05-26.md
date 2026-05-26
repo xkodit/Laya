@@ -1,5 +1,7 @@
 # Round 3 — V&V de l'itération du prompt (post Hadi-50)
 
+**✓ VALIDÉ PAR HADI — 2026-05-26.** Verdict global "OK" sur l'ensemble du paquet. Les 7 axes sont passés. Le système prompt v3 est officiellement la baseline pour la suite de Phase A.
+
 **Dernière mise à jour : 2026-05-26 (en soirée).** Refresh avec les derniers transcripts après deux itérations supplémentaires (durcissement Q4 + revert d'un test Haiku) et après l'expansion du corpus (CCI 1977 + 3 autres docs).
 
 Salut Hadi !
@@ -58,7 +60,7 @@ J'ai déjà retesté chaque question — voici les transcripts. Ton verdict V&V 
 >
 > **En résumé :** si vous êtes en train de recruter ou de formaliser une situation, l'écrit est la bonne option dans tous les cas — et l'obligation dans la plupart. Vous avez une situation particulière en tête ?
 
-**Verdict Hadi :**
+**Verdict Hadi : ✓ OK (2026-05-26)**
 
 ---
 
@@ -85,7 +87,7 @@ Q17 — "Un CDD peut être renouvelé plusieurs fois ou il y a une limite ?"
 
 (Q10 est la même question que Q9 — re-test couvert par Q9.)
 
-**Verdict Hadi (re-clique en UI si tu veux confirmer) :**
+**Verdict Hadi : ✓ OK (2026-05-26)**
 
 ---
 
@@ -154,7 +156,7 @@ Q17 — "Un CDD peut être renouvelé plusieurs fois ou il y a une limite ?"
 
 **À noter :** plus de "doublement illégal", phrasing conditionnel sur le dépassement, demande explicite si les 2 heures sont payées avant de conclure. Le verdict sur la pause s'appuie maintenant sur la CCI 1977 Art. 52 (nouvelle source en corpus) pour le seuil de 6h. Math corrigé : 12h-14h = 2h (pas 3h comme dans la version précédente).
 
-**Verdict Hadi :**
+**Verdict Hadi : ✓ OK (2026-05-26)**
 
 ---
 
@@ -179,7 +181,7 @@ Q17 — "Un CDD peut être renouvelé plusieurs fois ou il y a une limite ?"
 >
 > Vous savez d'où vient l'eau chez Nouvelle Mici Embaci ?
 
-**Verdict Hadi :**
+**Verdict Hadi : ✓ OK (2026-05-26)**
 
 ---
 
@@ -209,7 +211,7 @@ Q17 — "Un CDD peut être renouvelé plusieurs fois ou il y a une limite ?"
 >
 > Vous cherchez à savoir si vous y avez droit personnellement, ou c'est pour gérer une équipe ?
 
-**Verdict Hadi :**
+**Verdict Hadi : ✓ OK (2026-05-26)**
 
 ---
 
@@ -237,7 +239,7 @@ Q17 — "Un CDD peut être renouvelé plusieurs fois ou il y a une limite ?"
 
 **À noter :** plus aucune mention de l'indemnité de fin de CDD (3 %) — même pas pour préciser qu'elle ne s'applique pas. La règle `2d93c57` a tenu.
 
-**Verdict Hadi :**
+**Verdict Hadi : ✓ OK (2026-05-26)**
 
 ---
 
