@@ -153,8 +153,15 @@ export async function POST(req: Request) {
     .eq("conversation_id", conversationId)
     .order("created_at", { ascending: true });
 
+  // Cap the conversation history we send to the model. Caps per-turn input
+  // tokens at a roughly stable budget regardless of conversation length
+  // (otherwise input tokens grow linearly per turn). All messages still
+  // persist to the DB; only the model's view is capped. Spec §7.4 sliding-
+  // window summarization will replace this with summarization later.
+  const HISTORY_MESSAGE_CAP = 6; // 3 user+assistant turns
   const priorUi = dbMessagesToUi((priorRows ?? []) as DbMessage[]);
-  const uiMessages: UIMessage[] = [...priorUi, incomingMessage];
+  const cappedPriorUi = priorUi.slice(-HISTORY_MESSAGE_CAP);
+  const uiMessages: UIMessage[] = [...cappedPriorUi, incomingMessage];
 
   const searchTool = tool({
     description:
@@ -214,11 +221,19 @@ export async function POST(req: Request) {
   return result.toUIMessageStreamResponse({
     originalMessages: uiMessages,
     onFinish: async ({ messages }) => {
+      // Aggregated usage across all steps of this turn (multi-pass tool
+      // calling counts as one logical turn). totalUsage resolves once the
+      // stream is fully consumed — consumeStream() above guarantees that.
+      const totalUsage = await result.totalUsage;
+      const inputTokens = totalUsage?.inputTokens ?? null;
+      const outputTokens = totalUsage?.outputTokens ?? null;
+
       // messages is the full UIMessage[] including the new user + assistant
-      // turns. priorRows already covers the prefix from the DB, so anything
-      // beyond that index is new. We let Postgres assign uuids (the AI SDK's
-      // own ids aren't uuids and would clash with the column's uuid type).
-      const priorCount = priorRows?.length ?? 0;
+      // turns. Slice from cappedPriorUi.length (not priorRows.length) since
+      // that's the actual count of prior messages we sent to the model.
+      // We let Postgres assign uuids (the AI SDK's own ids aren't uuids
+      // and would clash with the column's uuid type).
+      const priorCount = cappedPriorUi.length;
       const newMessages = messages.slice(priorCount);
 
       // Citation validation: walk the final assistant text and check that
@@ -249,8 +264,20 @@ export async function POST(req: Request) {
         }
       }
 
+      // Attribute the turn's token usage to the LAST assistant message
+      // in the new set (the final synthesis the user sees). Intermediate
+      // assistant steps from multi-pass tool calling stay null so
+      // SUM(input_tokens) per conversation doesn't double-count.
+      let lastAssistantIdx = -1;
+      for (let i = newMessages.length - 1; i >= 0; i--) {
+        if (newMessages[i].role === "assistant") {
+          lastAssistantIdx = i;
+          break;
+        }
+      }
+
       const toInsert = newMessages
-        .map((m) => ({
+        .map((m, idx) => ({
           conversation_id: conversationId,
           role: m.role,
           content: extractText(m),
@@ -262,6 +289,8 @@ export async function POST(req: Request) {
             m.role === "assistant"
               ? (extractCitedChunks(m) as unknown as object)
               : null,
+          input_tokens: idx === lastAssistantIdx ? inputTokens : null,
+          output_tokens: idx === lastAssistantIdx ? outputTokens : null,
         }))
         .filter((r) => r.content.length > 0 || r.role === "assistant");
 
@@ -272,6 +301,23 @@ export async function POST(req: Request) {
           .insert(toInsert);
         if (insertError) {
           console.error("[chat] failed to persist messages", insertError);
+        }
+
+        // Log one usage_events row per chat turn (spec §13). Used for
+        // per-user analytics and Phase B quota enforcement. cost_usd
+        // stays null for now — pricing math is separate work.
+        if (inputTokens !== null || outputTokens !== null) {
+          const { error: usageError } = await service
+            .from("usage_events")
+            .insert({
+              user_id: user.id,
+              event_type: "chat_message",
+              input_tokens: inputTokens ?? 0,
+              output_tokens: outputTokens ?? 0,
+            });
+          if (usageError) {
+            console.error("[chat] failed to log usage_events", usageError);
+          }
         }
       }
 
