@@ -164,14 +164,13 @@ Built directly from the Hadi-50 + round-2 findings above. Commits in chronologic
 | Q21 — assumption-naming (3-msg) | ✓ PASSED with caveat ("c'est clairement du dépassement" still leans verdict-y; rescued by the conditional "Si ta 'demi-journée'…" framing) |
 | Q23 — assumption-naming (water source) | ✓ PASSED |
 | Q40 — capability honesty | ✓ PASSED |
-| Q19 — scope discipline (post-`2d93c57`) | RE-TEST PENDING |
+| Q19 — scope discipline (post-`2d93c57`) | ✓ PASSED (validated 2026-05-26 soir — see *Haiku experiment + Sonnet validation complete* below) |
 
 **What's open:**
 
-1. **Q19 re-test in deployed UI** — fresh chat, CDD-continuation question, verify Laya doesn't mention the 3 % indemnité at all (not even to negate it).
-2. **Hadi's V&V verdicts** on the round-3 packet. His response is the gate.
-3. Anything MAUVAIS → back into the iteration loop for that axis.
-4. All clean → bottleneck becomes breadth (recruit testers #2/#3 per §12).
+1. **Hadi's V&V verdicts** on the round-3 packet. His response is the gate.
+2. Anything MAUVAIS → back into the iteration loop for that axis.
+3. All clean → bottleneck becomes breadth (recruit testers #2/#3 per §12).
 
 ### Corpus expansion + ingest pipeline fixes (2026-05-26)
 
@@ -206,6 +205,35 @@ See §14 for current live corpus state.
 
   Decision: hold per spec §3. Reasoning unchanged: corpus is FR-only (citations + quoted legal text stay French regardless of response language), Phase A QA burden doubles with bilingual eval, round-3 V&V packet is FR-focused and still pending Hadi's verdicts. Revisit once FR v3 signs off and Phase A ships.
 
+### Haiku 4.5 experiment + Sonnet validation complete (2026-05-26 soir)
+
+Cost-driven test of Haiku 4.5 as Sonnet 4.6's replacement. Result: **not viable for Laya**. Reverted same day after full v3 validation on Sonnet.
+
+- **`023bc01`** — switched MODEL_ID from `claude-sonnet-4-6` to `claude-haiku-4-5-20251001` in `app/api/chat/route.ts`.
+- **`d95fbd9`** — hardened the "Structure d'explication" section in `lib/chat/system-prompt.ts`. Added explicit "INTERDIT : ouvrir par l'exception" rule + anti-example ("✗ MAUVAISE ouverture") with the bad pattern shown before the good pattern + auto-vérification reminder, plus a final bullet in "Format de réponse" to verify rule-before-exception ordering before sending. Initial trigger was Q4 regression on Haiku. Strict-additive — kept on Sonnet after revert.
+- **`c24f6e1`** — reverted MODEL_ID back to `claude-sonnet-4-6`.
+
+**Why Haiku failed:** Q21 hallucinated a legal threshold under a real citation. Haiku claimed *"toute journée de travail de 6 heures ou plus ouvre droit à une pause de 30 minutes minimum [Art. 11 du Décret n° 2024-898]"* — but Art. 11 of Décret 2024-898 says nothing of the kind (it's about service de quart in continuous-production facilities, max 8h including 30-min pause). The model picked an article that pattern-matched the topic and asserted content that wasn't there. For a product whose §1 differentiator is *"audit-grade citations — the model literally cannot fabricate a citation pointing to a span that wasn't in the source document"*, this is a product-killing failure mode. Bracket-pattern citations (current implementation; native Citations API still deferred) give no enforcement — Sonnet largely respects the discipline naturally, Haiku does not.
+
+**Pattern observed:** out of 5 axes re-tested on Haiku, 2 passed cleanly (Q19, Q23), 1 passed only after the `d95fbd9` hardening (Q4), 1 was borderline (Q40 — bare `[Art. 56]` with no doc qualifier, possibly misattributing CCI 1977 as general law), and 1 hard-failed with fabricated content (Q21). Extrapolating to the 50-question set: 8–15 MAUVAIS expected — worse than the 8/50 Sonnet baseline that v3 was designed to fix.
+
+**Sonnet 4.6 validation complete on the current build** (all of today's prompt iterations + the `d95fbd9` hardening + prompt caching from `d6716fe` + corpus expansion): all 7 axes pass preliminary tests.
+
+| Axis | Preliminary verdict |
+|---|---|
+| Q4 — standard-before-exception (post-`d95fbd9`) | ✓ PASSED |
+| Q9 / Q10 / Q17 — citation UI | ✓ PASSED (badge clicks earlier today) |
+| Q19 — scope discipline (post-`2d93c57`) | ✓ PASSED (no 3 % indemnité mention) |
+| Q21 — assumption-naming (3-msg, post-corpus-expansion) | ✓ PASSED (uses CCI 1977 Art. 52 for the 6h pause threshold, math corrected, no "doublement illégal" verdict) |
+| Q23 — water source assumption | ✓ PASSED |
+| Q40 — capability honesty | ✓ PASSED |
+
+**V&V packet refreshed in `e9ee36b`** with the latest transcripts: Q4 (post-`d95fbd9`), Q21 (post-corpus, CCI-enriched), Q19 (newly added, was previously pending). Header notes the corpus state change + brief explanation of the Haiku detour for Hadi's context. Path stays `eval/round-3-prompt-iteration-2026-05-26.md`.
+
+**Path forward:** Hadi's V&V verdicts are the next gate. If clean → v3 is officially validated and Phase A advances toward closed-beta tester expansion. If any axis comes back MAUVAIS → that axis goes back into the iteration loop.
+
+**Cost path (deferred):** Haiku 4.5 ruled out. Real options for Phase B viability — Pro-tier pricing bump (5,000 → 10,000–15,000 XOF), quota reduction (300 → 100 msgs/mo), Mistral Medium 3 eval (French-native, EU-hosted, ~7× cheaper than Sonnet, unknown on the 6 Hadi rules), or architectural cuts (top-6 → top-4 chunks, `stepCountIs(8)` → `stepCountIs(5)`, sliding-window summarization §7.4). Not blocking Phase A.
+
 ### Open non-code actions (Hussein owns — see §12 for detail)
 
 - [x] **Branding** (logo + wordmark + palette) — locked 2026-05-21, see `/branding/brand.md`
@@ -223,11 +251,11 @@ Read this file first, then `git log --oneline -20` for the latest commits. The c
 
 **Most likely next slice (in order of priority):**
 
-1. **Q19 re-test in the deployed UI** — fresh chat, CDD-continuation question, verify Laya doesn't mention the 3 % indemnité at all (not even to negate it). Smallest remaining piece of the v3 iteration. Code change in `lib/chat/system-prompt.ts` (commit `2d93c57`).
-2. **Wait for Hadi's V&V verdicts** on the round-3 packet (`eval/round-3-prompt-iteration-2026-05-26.md`, sent 2026-05-26). His response is the gate for declaring v3 validated. Anything MAUVAIS → that axis goes back into the iteration loop.
-3. **Recruit testers #2 and #3** (5–7 names across personas) — once Hadi signs off, the bottleneck becomes breadth. Need ≥25 filled rows from 2+ testers to unblock the runner (per `eval/README.md`). Also covers the §12 "Beta tester pipeline" item.
-4. **Sliding-window summarization** (spec §7.4) — schema exists, summarizer job doesn't. Becomes visible as soon as testers run conversations past ~20 turns.
-5. **Closed-beta open** (week 8+) — once testers #2/#3 have run a full pass, expand allowlist per §13.
+1. **Wait for Hadi's V&V verdicts** on the refreshed round-3 packet (`eval/round-3-prompt-iteration-2026-05-26.md`, last refresh in `e9ee36b`). His response is the gate for declaring v3 validated. Anything MAUVAIS → that axis goes back into the iteration loop.
+2. **Recruit testers #2 and #3** (5–7 names across personas) — once Hadi signs off, the bottleneck becomes breadth. Need ≥25 filled rows from 2+ testers to unblock the runner (per `eval/README.md`). Also covers the §12 "Beta tester pipeline" item.
+3. **Sliding-window summarization** (spec §7.4) — schema exists, summarizer job doesn't. Becomes visible as soon as testers run conversations past ~20 turns. Doubles as a Phase B cost lever.
+4. **Closed-beta open** (week 8+) — once testers #2/#3 have run a full pass, expand allowlist per §13.
+5. **Phase B cost path** — Pro-tier pricing bump, quota cut, Mistral Medium 3 eval, or architectural cuts (top-6 → top-4 chunks, step-cap reduction). Not blocking Phase A but needs a decision before Phase B launch — current Sonnet 4.6 cost (~$0.07/turn) doesn't break even on the spec §9 Pro tier (5,000 XOF / 300 msgs).
 
 The bracket→native-citations migration is non-urgent and deferred until eval data justifies the work.
 
