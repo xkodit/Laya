@@ -5,7 +5,7 @@
 
 ---
 
-## 0. Status (as of 2026-05-26)
+## 0. Status (as of 2026-05-27)
 
 **Decision: GO.** Branding locked, all architectural decisions locked. Coding underway since 2026-05-22.
 
@@ -232,6 +232,53 @@ Cost-driven test of Haiku 4.5 as Sonnet 4.6's replacement. Result: **not viable 
 
 **Cost path (deferred):** Haiku 4.5 ruled out. Real options for Phase B viability — Pro-tier pricing bump (5,000 → 10,000–15,000 XOF), quota reduction (300 → 100 msgs/mo), Mistral Medium 3 eval (French-native, EU-hosted, ~7× cheaper than Sonnet, unknown on the 6 Hadi rules), or architectural cuts (top-6 → top-4 chunks, `stepCountIs(8)` → `stepCountIs(5)`, sliding-window summarization §7.4). Not blocking Phase A.
 
+### Post-validation cycle + cheap-model experimentation (2026-05-27)
+
+Day after Hadi's V&V signed off v3. Three threads of work:
+
+**Thread 1 — Plan-mode 5-step execution (cost telemetry + safety net):**
+
+- `bc5938d` — created `laya-prompts.md` — consolidated all four prompts (static system, user context, search tool, OCR) into one reviewable file. Snapshot, not source of truth.
+- `05845a2` — revert(chat) from a Mistral experiment back to Sonnet 4.6.
+- `8cb97d7` — feat(chat) — `lib/chat/citations-validator.ts` + wire-up in `onFinish`. Server-side validation of every `[Art. X]` / `[Loi …]` / `[Décret …]` bracket against chunks retrieved that turn. Uses the same matching algorithm as the client renderer (same regex, same `normalize()`, same exact-then-hierarchical-then-doc fallback). **Logging-only for v1** — unmatched citations surface in Vercel logs as `[chat] citation-fabrication conversation=… unmatched=N/M labels=[…]`. No content modification, no UI change. Defense-in-depth telemetry for any future cheap-model swap.
+- `196fbe0` — perf(chat) — `HISTORY_MESSAGE_CAP = 6` (3 user+assistant turns) + populate `messages.input_tokens` / `messages.output_tokens` + insert one `usage_events` row per turn. Caps per-turn input tokens at a roughly stable budget regardless of conversation length; gives us per-conversation and per-user cost queries against Supabase from this point forward. Side effect: `priorCount` in `onFinish` switched from `priorRows.length` to `cappedPriorUi.length` so persistence still works after the cap kicks in.
+
+**Thread 2 — Cheap-model experiments (Phase B viability):**
+
+Re-litigated the model-swap cost lever now that we have telemetry. Same 7-axis V&V baseline as Hadi's validated Sonnet packet.
+
+- `6491fb5` — experiment: Mistral Medium retry (with citation telemetry now in place). 11 questions tested across two attempts.
+  - Result: **Not viable.** 4 MAUVAIS / 3 BORDERLINE / 6 PASSED. Specific failures: Q21c reproduces Hadi's original "doublement illégal" axis (computes heures sup against contractual demi-journée hours instead of the 40h/semaine threshold); Q19 inconsistent on scope discipline; basic factual question on max daily hours wrong both runs (says "no daily max" or "10-12h" instead of 8h/jour); occasional French-law contamination (1/3 délai de carence, 2.5 j/mo congés).
+- `dc2ffce` — experiment: Gemini Flash 2.5.
+  - Result: **Best cheap-model result so far.** 10 questions tested: 7 PASSED / 2 BORDERLINE / 1 MAUVAIS / 1 ERROR (free-tier rate limit suspected). Q4 standard-before-exception inverts (opens with CDI verbal as "principe général"); everything else passes including the critical Q21c. **No French-law contamination** on any question — Google's broader multilingual training beats Mistral's French-native priors on a non-French French-language corpus. Cost ~5-7× cheaper than Sonnet; Pro tier becomes profitable at 5,000 XOF / 300 msgs.
+- `c7e931e` — experiment: DeepSeek Chat (V3).
+  - Result: **Q4 inverted same as Gemini.** Then API balance ran out after one or two turns (`402 Insufficient Balance` from DeepSeek API). Inconclusive — needs balance top-up to continue.
+
+Same `MODEL_ID`-and-import-line swap pattern for all three providers. `@ai-sdk/mistral`, `@ai-sdk/google`, `@ai-sdk/deepseek` packages all stayed installed for easy revert/retry.
+
+**Thread 3 — Security gap caught and fixed:**
+
+`.env.example` accidentally contained real `MISTRAL_API_KEY` and `GOOGLE_GENERATIVE_AI_API_KEY` values instead of placeholders. **Never committed to remote** — uncommitted local edits only — so no key rotation strictly needed. Fixed back to placeholder form in `dc2ffce` commit alongside the Gemini swap. Lesson: real keys go to `.env.local` (gitignored) and Vercel UI only; `.env.example` is the template that gets committed.
+
+**Current state on Vercel (end of session 2026-05-27):**
+
+Production is on **DeepSeek Chat with depleted balance** — chat is non-functional until the balance is topped up at platform.deepseek.com OR a manual model revert is shipped. To restore: change `MODEL_ID` and the import in `app/api/chat/route.ts` back to Sonnet (`"claude-sonnet-4-6"` + `import { anthropic } from "@ai-sdk/anthropic"` + restore the `providerOptions.anthropic.cacheControl` block) or to Gemini Flash (`"gemini-2.5-flash"` + `import { google } from "@ai-sdk/google"`).
+
+**Cheap-model scorecard so far (preliminary, not Hadi-validated):**
+
+| Model | Cost vs Sonnet | Result |
+|---|---|---|
+| Haiku 4.5 (yesterday) | 3× cheaper | ✗ Citation hallucination |
+| Mistral Medium ×2 | 6× cheaper | ✗ Q21c MAUVAIS, factual errors, French-law contamination |
+| Gemini Flash 2.5 | 5-7× cheaper | ⚠️ 7/10 PASSED, only Q4 fails — strongest candidate so far |
+| DeepSeek Chat | 12× cheaper | ❓ Inconclusive (balance hit after Q4 inversion) |
+
+**Next decision (open):** which model leaves session 2026-05-27 as the chat baseline.
+
+- **Sonnet** — safest, Hadi-validated, but doesn't break even on Pro tier
+- **Gemini Flash** — best cheap-model so far, would need Hadi V&V on the 10-transcript packet before promoting
+- **DeepSeek** — would need balance top-up + completion of the V&V; Q4 already shows same inversion as Gemini, so unclear if it offers anything Gemini doesn't
+
 ### Open non-code actions (Hussein owns — see §12 for detail)
 
 - [x] **Branding** (logo + wordmark + palette) — locked 2026-05-21, see `/branding/brand.md`
@@ -249,12 +296,11 @@ Read this file first, then `git log --oneline -20` for the latest commits. The c
 
 **Most likely next slice (in order of priority):**
 
-v3 prompt is Hadi-validated as of 2026-05-26. Bottleneck shifts from code to breadth.
-
-1. **Recruit testers #2 through #5+** (5–7 names across personas — salarié, RH, dirigeant, avocat, friends per §10). Hadi counts as tester #1. Need ≥25 filled eval rows from 2+ testers to unblock the runner (per `eval/README.md`), and the §10 beta-open bar wants 5 testers saying *"yes I'd use this"* after 10 min. Also covers the §12 "Beta tester pipeline" item.
-2. **Sliding-window summarization** (spec §7.4) — schema exists, summarizer job doesn't. Becomes visible as soon as testers run conversations past ~20 turns. Doubles as a Phase B cost lever.
-3. **Closed-beta open** (week 8+) — once testers #2–#5 have run a full pass, expand allowlist per §13.
-4. **Phase B cost path** — Pro-tier pricing bump, quota cut, Mistral Medium 3 eval, or architectural cuts (top-6 → top-4 chunks, step-cap reduction). Not blocking Phase A but needs a decision before Phase B launch — current Sonnet 4.6 cost (~$0.07/turn) doesn't break even on the spec §9 Pro tier (5,000 XOF / 300 msgs).
+1. **Decide chat model + restore production.** Production currently on DeepSeek with depleted balance → chat is broken. Options: (a) revert to Sonnet 4.6 (safest, Hadi-validated, expensive); (b) swap to Gemini Flash 2.5 (best cheap-model result so far, 7/10 PASSED but needs Hadi V&V); (c) top up DeepSeek + finish its V&V before deciding. See *Post-validation cycle + cheap-model experimentation (2026-05-27)* above. One-line `MODEL_ID` + import change in `app/api/chat/route.ts`.
+2. **If picking Gemini Flash: package round-4 V&V for Hadi** (`eval/round-4-gemini-flash-2026-05-27.md`) with the 10 transcripts + the Q4 standard-before-exception inversion flagged so Hadi can specifically judge whether it's blocking.
+3. **Recruit testers #2 through #5+** (5–7 names across personas — salarié, RH, dirigeant, avocat, friends per §10). Hadi counts as tester #1. Need ≥25 filled eval rows from 2+ testers to unblock the runner (per `eval/README.md`), and the §10 beta-open bar wants 5 testers saying *"yes I'd use this"* after 10 min. Also covers the §12 "Beta tester pipeline" item.
+4. **Sliding-window summarization** (spec §7.4) — schema exists, summarizer job doesn't. Becomes visible as soon as testers run conversations past ~20 turns. Doubles as a Phase B cost lever.
+5. **Closed-beta open** (week 8+) — once testers #2–#5 have run a full pass, expand allowlist per §13.
 
 The bracket→native-citations migration is non-urgent and deferred until eval data justifies the work.
 
