@@ -401,6 +401,83 @@ Combined: ~85 tokens/turn off the tool-result block, stacking with the query exp
 - DOC_LABEL map maintained manually in `lib/chat/retrieval.ts`. When a new doc is added to the corpus (admin upload + `--from-pending` ingest), it should be added to DOC_LABEL too, otherwise citations show the raw DB reference. Worth automating later.
 - The cleaned Art. 15.10 chunk was a one-off fix. Other articles MAY have similar trailing-junk pollution from the ingest chunker. Worth a corpus-wide audit before opening to tester #2-5.
 
+### Token optimization design grill — decisions for future implementation (2026-05-27 nuit)
+
+After Hadi's round-4 V&V cleared the routing architecture, ran a deep design grill on token-cost optimization for **Phase B unit-economics prep + current Anthropic bill comfort**. Decisions captured here; **no implementation tonight** — the build is 6-9 hrs of focused engineering best done in dedicated clear-head sessions.
+
+**Baseline validated (not the plan's claim).** Pulled actual `usage_events` data via `scripts/token_baseline.py` (67 turns from today):
+
+| metric | min | p50 | p90 | p99 | max |
+|---|---|---|---|---|---|
+| input_tk | 3,541 | 10,593 | 21,339 | 38,889 | 38,889 |
+| output_tk | 196 | 541 | 1,025 | 2,065 | 2,065 |
+| total_tk | 3,737 | 11,134 | 22,364 | 40,954 | 40,954 |
+
+Average ~**12,281 tk/query** (not 22K as the optimization plan asserted — plan was off by ~2×). **Output is only 5% of total** (avg 603/12,281) — for Laya, input dominates and output-cap levers are low-leverage. **p99 = 41K** — that's the multi-pass adversarial tail. Variance is the killer for Pro-tier margin.
+
+Economic shape at current state: mix ~80% Gemini / 20% Sonnet → effective ~$0.013/query → Pro tier (5,000 XOF ≈ $8 / 300 msgs) costs ~$3.84/user/month, ~52% gross margin pre-payment-fees. Viable but with headroom needed.
+
+#### Decision tree
+
+**Tail-cap (one-liners — ship next session as a cheap warm-up):**
+
+- **`stepCountIs(8) → 4`** in `app/api/chat/route.ts` + system prompt "jusqu'à 3 fois par tour" in `lib/chat/system-prompt.ts`. Caps multi-pass at 3 tool calls + 1 synthesis. Today's retrieval improvements mean the model usually finds what it needs in 1 call — Q19 retest just made 1 call. Allowing 3 keeps reformulation budget for adversarial cases.
+- **`TOP_K = 6 → 3`** in `lib/chat/retrieval.ts`. Voyage rerank-2.5 already promotes the best chunks; 4-6 are diminishing-value tail. **Requires re-V&V with Hadi on multi-article axes (Q11, Q17, Q19)** before opening to testers #2-5.
+- **Greeting + meta-query interception** (basic regex) in `app/api/chat/route.ts`. Match `bonjour|salut|merci|ok|super|bonsoir` + word count < 4 → return canned response with `profile.full_name` interpolation. No API call. ~5 min build.
+- **Skip output `max_tokens` caps.** Output is 5% of cost for Laya; caps trade real quality risk (mid-sentence truncations) for negligible dollar gain.
+
+**Build 1 — Sliding-window summarization (replaces `HISTORY_MESSAGE_CAP = 6` truncation):**
+
+- Trigger: **message-count** — when conversation has >6 messages, recompute persisted summary covering everything except the last 6
+- Runs **async in `onFinish`** — no user-visible latency
+- Summarizer model: **Gemini Flash 2.5** (~$0.0004/call)
+- Summary length target: **500 tk** (specifics-preserving — preserve numbers/dates/names/contract types/sectors)
+- Approach: **wholesale re-summarization each trigger** — fresh perspective from full picture each time (vs incremental which risks framing drift)
+- Injection: synthetic **`[Résumé: ...]` assistant message** prepended before live window. Preserves Sonnet prompt-cache (system blocks stay byte-identical)
+- Schema already exists: `conversations.summary`, `conversations.summary_through_message_id` (migration 0004)
+- One-line system prompt addition needed: tell Laya `[Résumé:]`-prefixed messages are internal context, not to reference
+
+**Build 2 — Semantic response cache:**
+
+Two layers:
+
+1. **Hand-mapped exact-match layer** (~5-10 universal queries): SMIG montant, durée légale du travail hebdo, CNPS taux cotisation, congé annuel duration, etc. O(1) lookup on `query_norm`. Soft B-fallback to the semantic layer when no exact match.
+2. **Semantic embedding layer** (general purpose):
+   - **Eligibility filter** (composed with router): router-passed (i.e., not adversarial / not long) AND no first-person markers (`je|mon|ma|nous|notre|moi`) AND no digit sequences (`\d+`). Privacy-safe — case-specific stays out of cache.
+   - **Similarity threshold**: **0.92** with telemetry on near-miss scores (log top-3 to inform future tuning)
+   - **TTL**: **30 days** as safety backstop (storage cost negligible)
+   - **Invalidation**: three layers
+     - **Chunk-level selective (auto)**: on corpus update, for each new/modified `document_chunks.id`, DELETE cache entries where `retrieved_chunks` jsonb references that id. Add GIN index on `retrieved_chunks` for this.
+     - **Topic-level admin (manual)**: endpoint `POST /api/admin/cache/invalidate-topic` with keyword. For known law changes (SMIG decree, etc.).
+     - **30-day backstop**: catches anything the two layers above missed. Self-heals silent invalidation bugs.
+   - **Schema**: new `cached_responses` table (`query_norm`, `query_embedding vector(1024)`, `response_text`, `retrieved_chunks jsonb`, `hit_count`, `last_hit_at`, `created_at`, `expires_at`). HNSW index for vector. B-tree on `query_norm` and `expires_at`.
+   - **Cache key**: `query_norm + user_type` — fragments cache by role (7 user_types) to preserve tone-consistency. Per spec §2, role drives framing.
+   - **Separate `query_frequency` analytics table** (never wiped, feeds future promotion logic) — schema: `query_norm`, `user_type`, `count`, `first_seen`, `last_seen`.
+
+**Build 3 — Gemini Flash context caching:**
+
+- AI SDK v6 google provider supports `cachedContent` via `providerOptions.google.cachedContent` (reference to pre-created resource at `cachedContents/{id}`)
+- Important caveat: Gemini implicit caching only fires for prompts ≥4,096 tk. Our static prompt is ~3,500 — we get zero free caching. Explicit caching is the only path.
+- **Lifecycle**: deploy-hook invalidation + lazy self-heal fallback + **30-day TTL**
+- On every Vercel deploy that touches `lib/chat/system-prompt.ts`, run a post-deploy step that creates new cached content + deletes old + persists resource ID (settings table or env var)
+- In-call: try with the persisted reference; if 404/expired, create + retry + persist new ID
+- Storage cost at 30d TTL: ~$0.06/month — negligible
+- ROI: closed beta ~$2/month savings (negligible); Phase B free tier at 10K turns/day ~$240/month savings (real)
+
+#### Phase B / future follow-ups (track in §0 backlog)
+
+- **`stepCountIs(3)` + "2 max"** — graduate from `stepCountIs(4)` after tester traffic validates discipline. Reminder: revisit when ≥50 real-user turns accumulate without recovery-budget issues.
+- **TOP_K=3 V&V** — re-test Q11, Q17, Q19 multi-article axes with Hadi BEFORE opening to testers #2-5.
+- **Dimensional cache taxonomy** — graduate top-N topics to structured keys (e.g., `rule:labor:preavis-demission:CDI:cadre`) once `query_frequency` shows real hit-rate distribution. Reference design lives in user's `Desktop/laya_cache_taxonomy.html` — audited and partially rejected (premature for v1.0 — assumes domain classifier and OHADA/Tax corpora that don't exist), framework keepable for Phase B.
+- **Cache evaluation tooling + evergreen TTL** — periodic audit of `cached_responses`. Promote stable, high-hit entries to indefinite-TTL ("undetermined"). Demote stale or low-value entries. Manual at first, automated later.
+- **Hot-question promotion** based on `hit_count` — high-hit entries get either extended TTL or hand-curated lawyer-reviewed answers (eventual static answer layer).
+- **Static answer layer for top-20 questions** — once `query_frequency` has ≥2 weeks of data. Lawyer-reviewed answers, O(1) lookup before any cache check.
+- **Auto-update `DOC_LABEL` on corpus growth** — currently maintained manually in `lib/chat/retrieval.ts`. Move to a `display_label` column on `documents` table, populated at admin upload time.
+- **Corpus-wide chunk audit** — the Art. 15.10 chunk had trailing CHAPITRE/SECTION pollution (fixed today via `scripts/fix_q19_chunk.py`). Other articles may have the same artifact. Audit before opening to testers #2-5.
+- **Batch API for contract generation** — Phase B feature, 50% Sonnet discount on async contract generation.
+- **`preferred_language` added to cache key** — v1.2 EN ship checklist item.
+- **Domain classifier** (labor/ohada/tax/cnps separation) — premature for v1.0 (FR-only labor per §3 + §14). Re-evaluate at v2.
+
 ### Open non-code actions (Hussein owns — see §12 for detail)
 
 - [x] **Branding** (logo + wordmark + palette) — locked 2026-05-21, see `/branding/brand.md`
@@ -418,9 +495,13 @@ Read this file first, then `git log --oneline -20` for the latest commits. The c
 
 **Most likely next slice (in order of priority):**
 
-1. **Recruit testers #2 through #5+** (5–7 names across personas — salarié, RH, dirigeant, avocat, friends per §10). Hadi counts as tester #1. Need ≥25 filled eval rows from 2+ testers to unblock the runner (per `eval/README.md`), and the §10 beta-open bar wants 5 testers saying *"yes I'd use this"* after 10 min. Also covers the §12 "Beta tester pipeline" item. **This is the gate to opening closed beta** — the routing architecture is Hadi-validated, the chat is production-stable, retrieval bugs are fixed.
-2. **Corpus-wide chunk audit** — the Art. 15.10 chunk had trailing CHAPITRE/SECTION pollution from the article-aware chunker (`scripts/ingest.py`). Other articles may have the same artifact. Worth a quick audit + selective re-ingest before testers #2-5 hit a similar gap.
-3. **Sliding-window summarization** (spec §7.4) — schema exists, summarizer job doesn't. Becomes visible as soon as testers run conversations past ~20 turns. Doubles as a Phase B cost lever; stacks with the existing per-turn savings from query expansion + canonical doc labels (commits `e77cce5`, `f15d586`).
+1. **Recruit testers #2 through #5+** (5–7 names across personas — salarié, RH, dirigeant, avocat, friends per §10). Hadi counts as tester #1. Need ≥25 filled eval rows from 2+ testers to unblock the runner (per `eval/README.md`), and the §10 beta-open bar wants 5 testers saying *"yes I'd use this"* after 10 min. Also covers the §12 "Beta tester pipeline" item. **This is the gate to opening closed beta** — the routing architecture is Hadi-validated, the chat is production-stable, retrieval bugs are fixed. **Non-code work, runs in parallel with the engineering items below.**
+2. **Token optimization implementation** — full design tree is locked in *Token optimization design grill — decisions for future implementation (2026-05-27 nuit)* above. ~6-9 hrs of focused engineering across multiple sessions. Sequence:
+   - **(a) Tail-cap one-liners** (~30 min total) — `stepCountIs(8) → 4`, `TOP_K = 6 → 3`, greeting interception, system prompt "jusqu'à 3 fois" change. Easiest warm-up. **Requires Hadi re-V&V on Q11/Q17/Q19 (multi-article axes) for TOP_K=3 BEFORE opening to testers #2-5.**
+   - **(b) Sliding-window summarization** (~2-3 hrs) — Build 1 in the design grill. Replaces `HISTORY_MESSAGE_CAP = 6` truncation.
+   - **(c) Semantic response cache** (~2-3 hrs) — Build 2 in the design grill. New `cached_responses` + `query_frequency` tables, chunk-level invalidation, eligibility filter, 30d TTL backstop, hand-mapped exact-match for ~5-10 universal queries.
+   - **(d) Gemini Flash context caching** (~1-2 hrs) — Build 3 in the design grill. Deploy-hook + lazy self-heal + 30d TTL.
+3. **Corpus-wide chunk audit** — the Art. 15.10 chunk had trailing CHAPITRE/SECTION pollution from the article-aware chunker (`scripts/ingest.py`). Other articles may have the same artifact. Worth a quick audit + selective re-ingest before testers #2-5 hit a similar gap.
 4. **Closed-beta open** (week 8+) — once testers #2–#5 have run a full pass, expand allowlist per §13.
 5. **Auto-update DOC_LABEL on corpus growth** — currently maintained manually in `lib/chat/retrieval.ts`. Each new doc ingested needs a hand-added entry, otherwise citations fall back to the raw DB reference (which may be slugified). Could be derived from a `display_label` column on `documents` populated at admin upload time.
 
