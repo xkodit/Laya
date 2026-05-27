@@ -77,14 +77,24 @@ export async function searchLaborCode(
 ): Promise<RetrievedChunk[]> {
   const embedding = await voyageEmbed(query);
 
+  // Hybrid retrieval (migration 0013): RPC merges vector top-30 + FTS
+  // top-30 via Reciprocal Rank Fusion, returns top CANDIDATE_COUNT.
+  // Replaces vector-only match_chunks (0009) which missed articles whose
+  // wording diverges from how users phrase questions (e.g. Art. 15.10
+  // saying "réputés être à durée indéterminée" vs user "CDD se termine
+  // mais je continue à travailler"). The FTS leg catches lexical hits.
   const supabase = createServiceClient();
-  const { data: candidates, error } = await supabase.rpc("match_chunks", {
-    query_embedding: embedding as unknown as string,
-    match_count: CANDIDATE_COUNT,
-    filter_primary_only: false,
-  });
+  const { data: candidates, error } = await supabase.rpc(
+    "match_chunks_hybrid",
+    {
+      query_embedding: embedding as unknown as string,
+      query_text: query,
+      match_count: CANDIDATE_COUNT,
+      filter_primary_only: false,
+    },
+  );
   if (error) {
-    throw new Error(`match_chunks failed: ${error.message}`);
+    throw new Error(`match_chunks_hybrid failed: ${error.message}`);
   }
   if (!candidates || candidates.length === 0) {
     return [];
