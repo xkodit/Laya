@@ -5,9 +5,9 @@
 
 ---
 
-## 0. Status (as of 2026-05-27)
+## 0. Status (as of 2026-05-27 soir)
 
-**Decision: GO.** Branding locked, all architectural decisions locked. Coding underway since 2026-05-22.
+**Decision: GO.** Branding locked, all architectural decisions locked. Coding underway since 2026-05-22. **Round-4 routing architecture (Gemini Flash 2.5 + Sonnet 4.6 + hybrid retrieval + validator-strip) Hadi-validated 2026-05-27.** Closed beta unblocked architecturally — gate is now tester recruitment (§12).
 
 ### Pickup-point questions — resolved 2026-05-22
 
@@ -20,7 +20,7 @@
 - [x] **Week 2–3: Local Python ingestion** — `scripts/ingest.py` with article-aware chunking, Voyage `voyage-3` embeddings, Claude vision OCR fallback for scanned PDFs, corpus storage bucket. `--from-pending` mode drains admin-uploaded documents. Two launch PDFs ingested. `match_chunks` RPC + smoke-test script proves vector retrieval returns sane results.
 - [x] **Profile + admin moderation** (week 6–7 work pulled forward) — `/profile` page with edit, change-password, account delete; admin views for documents, users, conversations, feedback.
 - [x] **Week 3–5: Streaming chat with tool-calling agent** — done in v1 form (commit `cc0402e`). See *Chat implementation snapshot* below for what's in and what's deferred.
-- [~] **Week 5–6: Eval set (50 Q&A) + runner** — brief + template shipped (commit `ce18cd4`). First tester (admin@kodit.ai friend) returned **11/50** on 2026-05-24, then a full **50/50 V&V pass on 2026-05-25** (41 OK / 8 MAUVAIS / 1 blank-counted-OK) — see *Full V&V — Hadi's 50-question pass* below. Round-3 V&V packet sent to Hadi 2026-05-26 (`eval/round-3-prompt-iteration-2026-05-26.md`) — see *Prompt iteration v3* below. Runner still deferred until ≥25 filled rows from ≥2 testers.
+- [~] **Week 5–6: Eval set (50 Q&A) + runner** — brief + template shipped (commit `ce18cd4`). First tester (admin@kodit.ai friend) returned **11/50** on 2026-05-24, then a full **50/50 V&V pass on 2026-05-25** (41 OK / 8 MAUVAIS / 1 blank-counted-OK) — see *Full V&V — Hadi's 50-question pass* below. Round-3 V&V packet sent to Hadi 2026-05-26 (`eval/round-3-prompt-iteration-2026-05-26.md`) — validated. **Round-4 V&V packet for the new routing architecture** (`eval/round-4-router-2026-05-27.md`) sent and validated by Hadi same day 2026-05-27 (5 OK + 2 OK-with-critique, no MAUVAIS). Both critiques actioned same day. Runner still deferred until ≥25 filled rows from ≥2 testers.
 - [~] **Week 6–7: Conversation CRUD (favorite, delete, copy, PDF) + sliding-window summarization** — favorite/rename/copy/PDF/Word/delete shipped via sidebar kebab menu 2026-05-24 (commits `05e9aff` + `83713c0`). Sliding-window summarization still not built.
 - [x] **Week 7–8: In-chat thumbs/report** — shipped 2026-05-24 (commit `7cc36fa`); per-message copy-to-clipboard added 2026-05-26 (`b5349c8`). Eval-driven prompt tuning v3 done 2026-05-26 (commits `31ffbb1` + `1fd082e` + `2d93c57` + `d95fbd9`) — see *Prompt iteration v3* below. **Hadi-validated 2026-05-26** on the refreshed round-3 packet — all 7 axes ✓ OK.
 - [ ] **Week 8+: Open closed beta** — gated on the above.
@@ -279,6 +279,128 @@ Production is on **DeepSeek Chat with depleted balance** — chat is non-functio
 - **Gemini Flash** — best cheap-model so far, would need Hadi V&V on the 10-transcript packet before promoting
 - **DeepSeek** — would need balance top-up + completion of the V&V; Q4 already shows same inversion as Gemini, so unclear if it offers anything Gemini doesn't
 
+### Routing architecture + V&V round-4 + retrieval fixes (2026-05-27 soir)
+
+Pivot from "find one cheap model that works" to "route by message shape". Closes the cheap-model adventure with a validated production architecture and addresses Hadi's round-4 critiques.
+
+**Thread 1 — Grok 4 Fast experiment closed.**
+
+Added xAI provider (`@ai-sdk/xai`), tested `grok-4-fast` as cheap-branch candidate. Result: equivalent to Gemini on most axes, slightly worse on Q19 (fabricated `[Art. 15.1]` + scope-violation mention of indemnité de fin de CDD). Same architectural Q4 standard-before-exception ceiling as every other cheap model tested. Reverted same day.
+
+Updated scorecard:
+
+| Model | Cost vs Sonnet | Result |
+|---|---|---|
+| Haiku 4.5 | 3× cheaper | ✗ Citation hallucination (yesterday) |
+| Mistral Medium ×2 | 6× cheaper | ✗ Q21c MAUVAIS, factual errors, French-law contamination |
+| Gemini Flash 2.5 | 5-7× cheaper | ⚠️ Works for short/factual messages; Q4 inverts |
+| DeepSeek Chat | 12× cheaper | ❓ Q4 inverts; balance ran out |
+| **Grok 4 Fast** | 5-7× cheaper | ⚠️ Same Q4 ceiling + Q19 regression vs Gemini |
+
+**Pattern observed across 5 cheap models:** Q4 standard-before-exception is a cheap-model architectural wall (not a vendor problem). Sonnet is the only model that consistently opens with the rule before the exception. The native Anthropic Citations API (still deferred) is the real fix; until then, route the high-stakes turns to Sonnet.
+
+**Thread 2 — Whole-conversation router architecture.**
+
+`lib/chat/router.ts` (new). Per-turn deterministic classifier:
+
+- Message length > **150 chars** → **Sonnet 4.6**
+- Adversarial markers (`enceinte`, `grossesse`, `antidat`, `discrimin`, `harcel`, `licencier sans/pour`, etc.) → **Sonnet 4.6** regardless of length
+- Otherwise → **Gemini Flash 2.5**
+
+Threshold tuned on the Q21 corpus: M1 (72 chars) and M2 (62 chars) stay on Gemini (factual pause questions Gemini handles correctly); M3 (184 chars, detailed imprimerie scenario) routes to Sonnet (multi-axis synthesis with overtime computation that Gemini misses). Q19 at 106 chars stays on Gemini.
+
+`app/api/chat/route.ts` imports both providers, picks per turn. Sonnet branch keeps the `providerOptions.anthropic.cacheControl: { type: "ephemeral" }` hint so cached prefix discount survives the routing. Telemetry: `[chat] route=gemini|sonnet len=N convo=...` logged each turn for cost analysis.
+
+Commits: `d6ac6be` (initial router + validator strip), `35188ca` (corpus list addition), `2fd863b` (revert Round-3 rule overload that had broken Gemini's tool discipline), `7dd4743` (revert Grok → Gemini after experiment).
+
+**Thread 3 — Citation validator escalated to stripper.**
+
+`lib/chat/citations-validator.ts` gained `stripUnmatchedCitations(text, chunks)`. Same matching algorithm as `validateCitations` (exact article → hierarchical fallback → doc-only fallback). For each bracket `[Art. X]` / `[Loi …]` / `[Décret …]` in the assistant text, if no retrieved chunk matches → brackets stripped, inner text kept (`[Art. 13.1]` → plain text `Art. 13.1`).
+
+Wired into `onFinish` in the chat route. Persisted DB content is now clean of fabricated citations. **The live stream the user already saw is NOT touched** — pre-stream filtering would require buffering the whole response and lose progressive streaming. Acceptable for closed beta; on reload, brackets that don't resolve are gone.
+
+**Thread 4 — Corpus list + Décret 96-287 anti-example in system prompt.**
+
+`lib/chat/system-prompt.ts` gained a "Documents disponibles dans ton corpus" section listing the 6 corpus docs by canonical name. Décret n° 96-287 (real Ivorian decree, NOT in our corpus — Gemini fabricated it on Q4) is named explicitly as the anti-example. Conventions sectorielles other than CCI 1977, arrêtés divers, and jurisprudence also flagged as out-of-corpus.
+
+Commit: `35188ca`. Effective at preventing the Décret 96-287 fabrication on Q4 retest (still flips standard-before-exception structure occasionally, but no fabrication).
+
+**Thread 5 — Hadi V&V round-4 — VALIDATED.**
+
+V&V packet at `eval/round-4-router-2026-05-27.md`. Sent to Hadi same day. Returned same day with:
+
+| Axis | Verdict |
+|---|---|
+| Q4 | ✓ OK (Hadi explicitly accepted the standard-before-exception inversion since content is correct) |
+| Q9 | ✓ OK |
+| Q17 | ✓ OK |
+| Q19 | ⚠️ OK-with-critique — *"Why did Gemini not find the article if it is available?"* |
+| Q21 (3-msg) | ⚠️ OK-with-critique — *"demi-journée n'est pas une notion légale; the real problem is the lack of a break"* |
+| Q23 | ✓ OK |
+| Q40 | ✓ OK |
+
+**5 clean OKs + 2 OK-with-critique. No MAUVAIS.** Routing architecture officially validated for closed-beta opening. Both critiques actioned same day (see Threads 6 and 7).
+
+**Thread 6 — Q21 critique addressed: demi-journée prompt rule.**
+
+Commit `b02f4cb`. Replaced the existing "demi-journée" piège bullet in `lib/chat/system-prompt.ts` with a stronger version that names the concept as **extra-legal**: the Ivorian government does NOT impose half-day workdays before holidays or elsewhere. It's a collective company practice, often in favor of employees, but has no legal basis. Laya should clarify what the user means by "demi-journée" rather than accept it as a legal premise, and recenter the diagnostic on the actual legal problem (in Q21's case: absence of pause on 7h continuous work + potential 40h/sem overage).
+
+**Thread 7 — Q19 retrieval bug — three-layer fix.**
+
+Investigation (`scripts/investigate_q19.py`) revealed two issues:
+
+1. **Chunk pollution.** The Art. 15.10 chunk had trailing `CHAPITRE 6 EXECUTION ET SUSPENSION...` headers absorbed into its content from the article-aware chunker. Diluted the embedding.
+2. **Vector-only retrieval + vocabulary mismatch.** Spec §7.2 had always specified hybrid search (vector + FTS + RRF), but `match_chunks` (migration 0009) only implemented the vector leg. Art. 15.10's text uses formal vocabulary (*"ne satisfont pas aux exigences"*, *"réputés être à durée indéterminée"*) while users ask using casual abbreviations (CDD, CDI, "requalification", "continue à travailler"). Neither leg of a properly-implemented hybrid search would find Art. 15.10 because the user's tokens don't appear in the chunk's content.
+
+Fix shipped in three layers (commits `eb1cb6b`, `e77cce5`, `f15d586`):
+
+- **A. Cleaned Art. 15.10 chunk** (`scripts/fix_q19_chunk.py`): truncated to just the literal article sentence, re-embedded with voyage-3 `input_type=document`. Marginal improvement on its own (rank 7-12 in top 20 instead of not-in-top-20 on one query).
+- **B. Hybrid search per spec §7.2** (`supabase/migrations/0013_match_chunks_hybrid.sql`): new RPC `match_chunks_hybrid` merges vector top-30 + FTS top-30 via Reciprocal Rank Fusion (k=60). Uses the pre-existing GIN index on `to_tsvector('french', content)` (migration 0005). `lib/chat/retrieval.ts` now calls `match_chunks_hybrid` with both embedding + raw query text. Old `match_chunks` kept in place for the Python smoke-test.
+- **C. Hard-coded query expansion** (commit `e77cce5`): `QUERY_ALIASES` map in `lib/chat/retrieval.ts` substitutes abbreviations with their full forms BEFORE embedding + FTS:
+
+  ```
+  CDD  → CDD contrat à durée déterminée
+  CDI  → CDI contrat à durée indéterminée
+  SMIG → SMIG salaire minimum interprofessionnel garanti
+  CNPS, DGT, DRH, CCI, RH → analogous expansions
+  ```
+
+  Zero LLM tokens added — pure string substitution. This is what actually closed the Q19 gap. Before/after ranks for Art. 15.10 retrieval:
+
+  | Query | Vec | Hybrid | Hybrid+expansion |
+  |---|---|---|---|
+  | Natural user phrasing | 12 | 12 | **3** |
+  | "requalification CDD en CDI après terme" | — | — | **7** |
+  | "maintien en service après expiration CDD" | — | — | **10** |
+  | "CDD requalification automatique CDI" | — | — | **5** |
+
+**End-to-end Q19 retest (post-deploy):** Gemini routed correctly, called `search_labor_code`, retrieved Art. 15.10, emitted `[Art. 15.10]` with valid bracket, no scope violation (no mention of indemnité de fin de CDD). Closes Hadi's round-4 critique on Q19.
+
+**Thread 8 — Retrieval token-cost micro-optimizations.**
+
+Commit `f15d586`:
+
+- **Truncate chunk id → 8 hex chars** in `formatChunksForModel`. Server-side dedup (`extractCitedChunks` in route.ts) and client-side dedup (`chunksForMessage` in chat.tsx) both key on `c.id`; 8 chars is still unique among the 6 chunks per turn so dedup logic stays unchanged. Saves ~55 tokens/turn.
+- **Canonical doc labels** via `DOC_LABEL` map. The DB has inconsistent reference formatting (some clean, some slugified filenames like `19-juillet-1977-entre-AICI-et-UGTCI`, some bare codes like `CIV-57048`). Tool output now emits clean labels: `Loi 2015-532`, `Décret 2024-898`, `Convention AICI/UGTCI 1977`, `Décret 2024-902`, `Code Prévoyance Sociale`, `Décret 96-197`. Saves ~30 tokens/turn AND fixes citation badge UX (Gemini was writing `[Art. 52, 19-juillet-1977-entre-AICI-et-UGTCI]` from the raw reference).
+
+Combined: ~85 tokens/turn off the tool-result block, stacking with the query expansion savings.
+
+**Production state at end of session 2026-05-27 (soir):**
+
+| Layer | State |
+|---|---|
+| Chat models | Router: Gemini Flash 2.5 (cheap branch) + Sonnet 4.6 (long/individual-situation/adversarial) |
+| Citation discipline | Bracket-pattern with three-layer defense: (1) system-prompt corpus list + Règle dure rule, (2) server-side `validateCitations` logging, (3) server-side `stripUnmatchedCitations` on persist |
+| Retrieval | Hybrid search (vector + FTS + RRF) per spec §7.2, with hard-coded query expansion for abbreviations |
+| Prompt | Round-3 baseline + corpus list (35188ca) + demi-journée extra-legal rule (b02f4cb) |
+| Eval status | Round-4 architecture Hadi-validated. 2 critiques actioned same day. |
+
+**Open tech debt from today's work:**
+
+- Validator false-positives on bare `[Art. X]` brackets without doc qualifier — even when the article is matched, the validator's doc-only fallback can flag once if the bracket format is unusual. Cosmetic — the strip would leave the article number as plain text anyway. Low priority.
+- DOC_LABEL map maintained manually in `lib/chat/retrieval.ts`. When a new doc is added to the corpus (admin upload + `--from-pending` ingest), it should be added to DOC_LABEL too, otherwise citations show the raw DB reference. Worth automating later.
+- The cleaned Art. 15.10 chunk was a one-off fix. Other articles MAY have similar trailing-junk pollution from the ingest chunker. Worth a corpus-wide audit before opening to tester #2-5.
+
 ### Open non-code actions (Hussein owns — see §12 for detail)
 
 - [x] **Branding** (logo + wordmark + palette) — locked 2026-05-21, see `/branding/brand.md`
@@ -296,13 +418,13 @@ Read this file first, then `git log --oneline -20` for the latest commits. The c
 
 **Most likely next slice (in order of priority):**
 
-1. **Decide chat model + restore production.** Production currently on DeepSeek with depleted balance → chat is broken. Options: (a) revert to Sonnet 4.6 (safest, Hadi-validated, expensive); (b) swap to Gemini Flash 2.5 (best cheap-model result so far, 7/10 PASSED but needs Hadi V&V); (c) top up DeepSeek + finish its V&V before deciding. See *Post-validation cycle + cheap-model experimentation (2026-05-27)* above. One-line `MODEL_ID` + import change in `app/api/chat/route.ts`.
-2. **If picking Gemini Flash: package round-4 V&V for Hadi** (`eval/round-4-gemini-flash-2026-05-27.md`) with the 10 transcripts + the Q4 standard-before-exception inversion flagged so Hadi can specifically judge whether it's blocking.
-3. **Recruit testers #2 through #5+** (5–7 names across personas — salarié, RH, dirigeant, avocat, friends per §10). Hadi counts as tester #1. Need ≥25 filled eval rows from 2+ testers to unblock the runner (per `eval/README.md`), and the §10 beta-open bar wants 5 testers saying *"yes I'd use this"* after 10 min. Also covers the §12 "Beta tester pipeline" item.
-4. **Sliding-window summarization** (spec §7.4) — schema exists, summarizer job doesn't. Becomes visible as soon as testers run conversations past ~20 turns. Doubles as a Phase B cost lever.
-5. **Closed-beta open** (week 8+) — once testers #2–#5 have run a full pass, expand allowlist per §13.
+1. **Recruit testers #2 through #5+** (5–7 names across personas — salarié, RH, dirigeant, avocat, friends per §10). Hadi counts as tester #1. Need ≥25 filled eval rows from 2+ testers to unblock the runner (per `eval/README.md`), and the §10 beta-open bar wants 5 testers saying *"yes I'd use this"* after 10 min. Also covers the §12 "Beta tester pipeline" item. **This is the gate to opening closed beta** — the routing architecture is Hadi-validated, the chat is production-stable, retrieval bugs are fixed.
+2. **Corpus-wide chunk audit** — the Art. 15.10 chunk had trailing CHAPITRE/SECTION pollution from the article-aware chunker (`scripts/ingest.py`). Other articles may have the same artifact. Worth a quick audit + selective re-ingest before testers #2-5 hit a similar gap.
+3. **Sliding-window summarization** (spec §7.4) — schema exists, summarizer job doesn't. Becomes visible as soon as testers run conversations past ~20 turns. Doubles as a Phase B cost lever; stacks with the existing per-turn savings from query expansion + canonical doc labels (commits `e77cce5`, `f15d586`).
+4. **Closed-beta open** (week 8+) — once testers #2–#5 have run a full pass, expand allowlist per §13.
+5. **Auto-update DOC_LABEL on corpus growth** — currently maintained manually in `lib/chat/retrieval.ts`. Each new doc ingested needs a hand-added entry, otherwise citations fall back to the raw DB reference (which may be slugified). Could be derived from a `display_label` column on `documents` populated at admin upload time.
 
-The bracket→native-citations migration is non-urgent and deferred until eval data justifies the work.
+The bracket→native-citations migration is non-urgent and deferred until eval data justifies the work. The routing architecture means Sonnet handles every high-stakes turn anyway — native Citations would mostly close the Gemini fabrication gap on short turns, which the validator-strip already neutralizes.
 
 **Tech debt to track separately:**
 
