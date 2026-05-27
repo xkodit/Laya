@@ -6,7 +6,7 @@ import {
   stepCountIs,
   type UIMessage,
 } from "ai";
-import { mistral } from "@ai-sdk/mistral";
+import { google } from "@ai-sdk/google";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
@@ -16,7 +16,7 @@ import { validateCitations } from "@/lib/chat/citations-validator";
 
 export const maxDuration = 60;
 
-const MODEL_ID = "mistral-medium-latest";
+const MODEL_ID = "gemini-2.5-flash";
 
 type DbMessage = {
   id: string;
@@ -190,11 +190,11 @@ export async function POST(req: Request) {
     company: profile.company,
   });
 
-  // Mistral provider has no equivalent to Anthropic's ephemeral prompt
-  // cache. Static prefix + per-user tail structure kept so the revert
-  // back to Anthropic is one line.
+  // Google Gemini provider has no equivalent to Anthropic's ephemeral
+  // prompt cache. Static prefix + per-user tail structure kept so the
+  // revert back to Anthropic is one line.
   const result = streamText({
-    model: mistral(MODEL_ID),
+    model: google(MODEL_ID),
     system: [
       {
         role: "system",
