@@ -7,16 +7,17 @@ import "server-only";
 // (Q21 M3-class). Sonnet 4.6 stays the validated baseline for those
 // high-stakes turns.
 //
-// Cheap branch is currently Grok 4 Fast (swapped in from Gemini Flash
-// 2.5 after Gemini hit a rule-count ceiling on Q4 standard-before-
-// exception). Swap-friendly: only the model wiring in route.ts changes
-// when the cheap branch is replaced; this router file stays the same.
+// Cheap branch is currently Gemini Flash 2.5. Tested Grok 4 Fast as
+// cheap branch on 2026-05-27 — equivalent on most axes, slightly worse
+// on Q19 (fabricated Art. 15.1 + scope violation). Both share the same
+// Q4 standard-before-exception ceiling, which is an architectural
+// limit of cheap models, not a vendor problem.
 //
 // v1 is a deterministic regex/length classifier. No LLM call. Can swap
 // to a model-based classifier later if false-positive/negative rates
 // become problematic.
 
-export type RouteDecision = "grok" | "sonnet";
+export type RouteDecision = "gemini" | "sonnet";
 
 // Adversarial / bilateral-honesty triggers — Sonnet's reframe behavior
 // (spec §6.4) is hard to replicate cheaply. Catch discrimination,
@@ -46,6 +47,6 @@ export function routeMessage(text: string): RouteDecision {
   // Adversarial / discrimination axis → Sonnet regardless of length
   if (ADVERSARIAL_PATTERNS.some((r) => r.test(t))) return "sonnet";
 
-  // Default: short general/factual → cheap branch (Grok)
-  return "grok";
+  // Default: short general/factual → cheap branch (Gemini)
+  return "gemini";
 }
