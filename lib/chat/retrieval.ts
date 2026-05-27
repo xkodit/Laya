@@ -160,14 +160,53 @@ export async function searchLaborCode(
   });
 }
 
+// Canonical short labels for each corpus document. The DB stores
+// references in inconsistent formats — some have "n°" prefix, some
+// are slugified filenames (e.g. "19-juillet-1977-entre-AICI-et-UGTCI").
+// Normalize at tool-output time so the model emits clean, consistent
+// citations like [Art. 52, Convention AICI/UGTCI 1977] instead of
+// [Art. 52, 19-juillet-1977-entre-AICI-et-UGTCI].
+//
+// Keep these in sync with the corpus list in lib/chat/system-prompt.ts.
+// When a doc is added to the corpus, add its DB reference → canonical
+// label here.
+const DOC_LABEL: Record<string, string> = {
+  "Loi n° 2015-532": "Loi 2015-532",
+  "Décret n° 2024-898": "Décret 2024-898",
+  "19-juillet-1977-entre-AICI-et-UGTCI": "Convention AICI/UGTCI 1977",
+  "2024-902": "Décret 2024-902",
+  "CIV-57048": "Code Prévoyance Sociale",
+  "N° 96-197": "Décret 96-197",
+};
+
+function shortDocLabel(
+  reference: string | null,
+  title: string,
+): string {
+  if (reference && reference in DOC_LABEL) {
+    return DOC_LABEL[reference]!;
+  }
+  return reference ?? title;
+}
+
 // Compact JSON-friendly shape we hand to the model as the tool result.
 // Keep field names short — they're tokens the model has to read.
+// - `id` truncated to 8 chars: the model never reads id (citations
+//   are built from article + doc), but the SERVER-side dedup in
+//   route.ts extractCitedChunks AND the CLIENT-side dedup in
+//   components/chat/chat.tsx chunksForMessage both key on c.id.
+//   8 hex chars is still unique among 6 chunks per turn (~4B
+//   possibilities) so dedup stays correct, and we save ~28 chars
+//   per chunk × 6 = ~55 tokens/turn on the model side.
+// - `doc` normalized via DOC_LABEL to fix ugly slugified references
+//   (e.g. "19-juillet-1977-entre-AICI-et-UGTCI" → "Convention
+//   AICI/UGTCI 1977") and keep token count down.
 export function formatChunksForModel(chunks: RetrievedChunk[]) {
   return chunks.map((c) => ({
-    id: c.id,
+    id: c.id.slice(0, 8),
     article: c.article_ref ?? undefined,
     section: c.parent_section ?? undefined,
-    doc: c.document_reference ?? c.document_title,
+    doc: shortDocLabel(c.document_reference, c.document_title),
     primary: c.is_primary_source,
     content: c.content,
   }));
