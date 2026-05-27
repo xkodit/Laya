@@ -1,5 +1,7 @@
 # Round 4 — V&V de l'architecture de routage (post round-3)
 
+**✓ VALIDÉ PAR HADI — 2026-05-27.** Verdict global "OK" sur l'architecture. 5 axes OK propres, 2 axes OK-avec-critique (Q19 retrieval bug à investiguer, Q21 critique sur la notion de "demi-journée"). Aucun MAUVAIS. Le routeur Gemini/Sonnet + le validateur strip + la liste corpus dans le prompt sont approuvés pour la suite de Phase A.
+
 **Date :** 2026-05-27
 **Objet :** validation d'une nouvelle architecture qui route les messages entre **Gemini Flash 2.5** (branche économique) et **Sonnet 4.6** (baseline validée par toi en round-3), avec un validateur côté serveur qui supprime les citations fabriquées avant persistance.
 
@@ -66,7 +68,9 @@ Pour chaque axe : la question, le routage observé, la réponse, et tes verdicts
 
 **Question :** est-ce que cette structure inversée est bloquante pour la béta fermée, ou acceptable étant donné que le contenu reste juste ?
 
-**Verdict Hadi : ___**
+> **Réponse Hadi :** Acceptable comme le contenu est juste.
+
+**Verdict Hadi : ✓ OK (2026-05-27)**
 
 ---
 
@@ -91,7 +95,7 @@ Pour chaque axe : la question, le routage observé, la réponse, et tes verdicts
 >
 > Est-ce que cela répond à votre question ? Avez-vous une situation particulière en tête qui vous pousse à demander cela ?
 
-**Verdict Hadi : ___**
+**Verdict Hadi : ✓ OK (2026-05-27)**
 
 ---
 
@@ -117,7 +121,7 @@ Pour chaque axe : la question, le routage observé, la réponse, et tes verdicts
 
 **Note technique :** `[Art. 15.10 de la Loi n° 2015-532]` a été strippé par le validateur (Art. 15.10 n'avait pas été retourné par l'outil sur ce tour spécifiquement — la requête ciblait Art. 15.4). Le texte "Art. 15.10 de la Loi n° 2015-532" reste lisible mais n'est plus un badge cliquable.
 
-**Verdict Hadi : ___**
+**Verdict Hadi : ✓ OK (2026-05-27)**
 
 ---
 
@@ -145,7 +149,9 @@ Gemini a fait 3 recherches successives sans trouver Art. 15.10 dans les chunks r
 
 **⚠️ Mineure scope violation :** mention de "il n'y a plus de prime de précarité" — c'est une *négation* mais ça reste une mention. Tu avais flagué exactement ce pattern en round-3. À surveiller.
 
-**Verdict Hadi : ___**
+> **Critique Hadi :** Why did Gemini not find the article if it is available?
+
+**Verdict Hadi : ⚠️ OK-avec-critique (2026-05-27)** — bug retrieval à investiguer (Art. 15.10 EST dans le corpus mais l'outil ne le retourne pas de façon fiable sur cette requête).
 
 ---
 
@@ -206,7 +212,9 @@ C'est exactement le pattern que le routeur cible : les 2 premiers tours courts e
 
 **Note importante :** sur le M3, Sonnet a **fait le calcul des heures supplémentaires** (40h/semaine, additionnement) et **maintenu la discipline de portée sur la pause** (n'a pas affirmé une violation universelle). C'est exactement le pattern que tu avais validé en round-3 sur Q21.
 
-**Verdict Hadi : ___**
+> **Critique Hadi :** This is a trick question cause the government does not impose half work days before holidays, so this half day where our company makes us work is really a normal day where collectively companies did this half for the benefit of employees, so the real problem here is the lack of a break. Laya might want to clarify what demi-journée the user is talking about, since nothing legally says that there are days that should be half work days.
+
+**Verdict Hadi : ⚠️ OK-avec-critique (2026-05-27)** — la "demi-journée" n'a pas de fondement légal ivoirien (pas d'obligation gouvernementale de demi-journées avant fériés). C'est une pratique collective d'entreprise. Laya devrait clarifier ce que l'utilisateur·trice entend par "demi-journée" plutôt que de l'accepter implicitement, et recentrer sur le vrai problème (absence de pause). Règle à ajouter au prompt : nommer explicitement que "demi-journée" n'est pas une notion légale.
 
 ---
 
@@ -228,7 +236,7 @@ C'est exactement le pattern que le routeur cible : les 2 premiers tours courts e
 >
 > Pour clarifier la situation, est-ce que l'eau du robinet provient du réseau public (par exemple, la SODECI) ou d'une autre source (un puits, par exemple) ?
 
-**Verdict Hadi : ___**
+**Verdict Hadi : ✓ OK (2026-05-27)**
 
 ---
 
@@ -257,13 +265,13 @@ C'est exactement le pattern que le routeur cible : les 2 premiers tours courts e
 > *   La **convention collective** applicable à votre secteur d'activité (vous pouvez demander à votre employeur ou aux représentants du personnel quelle est la convention collective de votre entreprise).
 > *   Votre **délégué du personnel** ou les **représentants syndicaux** au sein de votre entreprise, s'il y en a.
 
-**Verdict Hadi : ___**
+**Verdict Hadi : ✓ OK (2026-05-27)**
 
 ---
 
 ## Limites connues à signaler
 
-1. **Q4 — structure inversée sur Gemini.** Le modèle ouvre par l'exception (CDI verbal) au lieu de la règle (écrit obligatoire majoritaire). Sonnet le faisait correctement en round-3. C'est une limite architecturale des modèles économiques — observée à l'identique sur Haiku, Mistral, Gemini, Grok. Le contenu reste juste, les citations sont valides, pas de fabrication. **Question pour toi : bloquant ou acceptable pour la béta fermée ?**
+1. **Q4 — structure inversée sur Gemini.** Le modèle ouvre par l'exception (CDI verbal) au lieu de la règle (écrit obligatoire majoritaire). Sonnet le faisait correctement en round-3. C'est une limite architecturale des modèles économiques — observée à l'identique sur Haiku, Mistral, Gemini, Grok. Le contenu reste juste, les citations sont valides, pas de fabrication. **Question pour toi : bloquant ou acceptable pour la béta fermée ?** → **Réponse Hadi : OK, acceptable**.
 
 2. **Q19 — retrieval incomplet sur Gemini.** L'outil n'a pas retourné Art. 15.10 de manière fiable. Laya est tombée en lane `[INFO]` honnêtement, mais le contenu manque la citation principale. C'est un bug de retrieval / chunking, à corriger séparément de l'architecture de routage.
 
