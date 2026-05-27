@@ -18,6 +18,40 @@ const CANDIDATE_COUNT = 20;
 const TOP_K = 6;
 const VOYAGE_API = "https://api.voyageai.com/v1";
 
+// Deterministic query expansion: bridge the gap between user
+// abbreviations (CDD, CDI, SMIG…) and the formal vocabulary used in
+// the legal corpus ("contrat à durée déterminée", "salaire minimum
+// interprofessionnel garanti"). Zero LLM tokens — pure string replace
+// applied before both the Voyage embed call and the FTS query.
+//
+// Why: Q19 ("CDD se termine mais je continue à travailler") didn't
+// retrieve Art. 15.10 because the chunk says "contrats à durée
+// déterminée... réputés être à durée indéterminée" — no overlap with
+// "CDD/CDI". Expanding the query covers the lexical gap on both legs
+// of the hybrid search.
+//
+// Word-boundary matching so "CDDS" or "incomplet" don't trigger
+// partial matches. Case-insensitive so "cdd"/"CDD"/"Cdd" all expand.
+const QUERY_ALIASES: Record<string, string> = {
+  CDD: "CDD contrat à durée déterminée",
+  CDI: "CDI contrat à durée indéterminée",
+  SMIG: "SMIG salaire minimum interprofessionnel garanti",
+  CNPS: "CNPS Caisse Nationale de Prévoyance Sociale",
+  DGT: "DGT Direction Générale du Travail",
+  DRH: "DRH directeur·trice des ressources humaines",
+  CCI: "CCI convention collective interprofessionnelle",
+  RH: "RH ressources humaines",
+};
+
+function expandQuery(query: string): string {
+  let expanded = query;
+  for (const [abbr, full] of Object.entries(QUERY_ALIASES)) {
+    const re = new RegExp(`\\b${abbr}\\b`, "gi");
+    expanded = expanded.replace(re, full);
+  }
+  return expanded;
+}
+
 async function voyageEmbed(query: string): Promise<number[]> {
   const res = await fetch(`${VOYAGE_API}/embeddings`, {
     method: "POST",
@@ -75,7 +109,10 @@ async function voyageRerank(
 export async function searchLaborCode(
   query: string,
 ): Promise<RetrievedChunk[]> {
-  const embedding = await voyageEmbed(query);
+  // Expand abbreviations BEFORE embedding + FTS so both legs of the
+  // hybrid search see the full formal vocabulary the corpus uses.
+  const expanded = expandQuery(query);
+  const embedding = await voyageEmbed(expanded);
 
   // Hybrid retrieval (migration 0013): RPC merges vector top-30 + FTS
   // top-30 via Reciprocal Rank Fusion, returns top CANDIDATE_COUNT.
@@ -88,7 +125,7 @@ export async function searchLaborCode(
     "match_chunks_hybrid",
     {
       query_embedding: embedding as unknown as string,
-      query_text: query,
+      query_text: expanded,
       match_count: CANDIDATE_COUNT,
       filter_primary_only: false,
     },

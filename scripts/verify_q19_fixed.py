@@ -27,6 +27,28 @@ QUERIES: list[str] = [
     "poursuite relation travail après terme CDD",
 ]
 
+# Mirror of QUERY_ALIASES in lib/chat/retrieval.ts. Keep in sync.
+QUERY_ALIASES = {
+    "CDD": "CDD contrat à durée déterminée",
+    "CDI": "CDI contrat à durée indéterminée",
+    "SMIG": "SMIG salaire minimum interprofessionnel garanti",
+    "CNPS": "CNPS Caisse Nationale de Prévoyance Sociale",
+    "DGT": "DGT Direction Générale du Travail",
+    "DRH": "DRH directeur·trice des ressources humaines",
+    "CCI": "CCI convention collective interprofessionnelle",
+    "RH": "RH ressources humaines",
+}
+
+
+def expand_query(q: str) -> str:
+    import re
+
+    out = q
+    for abbr, full in QUERY_ALIASES.items():
+        out = re.sub(rf"\b{abbr}\b", full, out, flags=re.IGNORECASE)
+    return out
+
+
 MATCH_COUNT = 20  # same as CANDIDATE_COUNT in retrieval.ts
 
 
@@ -43,17 +65,16 @@ def main() -> int:
     )
     voyage = VoyageClient(api_key=os.environ["VOYAGE_API_KEY"])
 
-    print(f"{'Query':70} | {'Vector-only':>12} | {'Hybrid':>10}")
+    print(f"{'Query':60} | {'Vec':>5} | {'Hybr':>5} | {'Hybr+exp':>8}")
     print("-" * 100)
 
     for q in QUERIES:
-        emb = voyage.embed([q], model="voyage-3", input_type="query").embeddings[0]
-
-        # Vector-only (old RPC)
+        # Vector-only (old RPC, original query)
+        emb_raw = voyage.embed([q], model="voyage-3", input_type="query").embeddings[0]
         v_res = sb.rpc(
             "match_chunks",
             {
-                "query_embedding": emb,
+                "query_embedding": emb_raw,
                 "match_count": MATCH_COUNT,
                 "filter_primary_only": False,
             },
@@ -63,11 +84,11 @@ def main() -> int:
             None,
         )
 
-        # Hybrid (new RPC)
+        # Hybrid (new RPC, original query)
         h_res = sb.rpc(
             "match_chunks_hybrid",
             {
-                "query_embedding": emb,
+                "query_embedding": emb_raw,
                 "query_text": q,
                 "match_count": MATCH_COUNT,
                 "filter_primary_only": False,
@@ -78,11 +99,29 @@ def main() -> int:
             None,
         )
 
-        v_str = f"rank {v_rank}" if v_rank else "NOT in top 20"
-        h_str = f"rank {h_rank}" if h_rank else "NOT in top 20"
+        # Hybrid + expansion (new RPC, expanded query)
+        expanded = expand_query(q)
+        emb_exp = voyage.embed([expanded], model="voyage-3", input_type="query").embeddings[0]
+        he_res = sb.rpc(
+            "match_chunks_hybrid",
+            {
+                "query_embedding": emb_exp,
+                "query_text": expanded,
+                "match_count": MATCH_COUNT,
+                "filter_primary_only": False,
+            },
+        ).execute()
+        he_rank = next(
+            (i for i, row in enumerate(he_res.data, 1) if "15.10" in (row.get("article_ref") or "")),
+            None,
+        )
 
-        q_short = q if len(q) <= 70 else q[:67] + "…"
-        print(f"{q_short:70} | {v_str:>12} | {h_str:>10}")
+        v_str = str(v_rank) if v_rank else "—"
+        h_str = str(h_rank) if h_rank else "—"
+        he_str = str(he_rank) if he_rank else "—"
+
+        q_short = q if len(q) <= 60 else q[:57] + "…"
+        print(f"{q_short:60} | {v_str:>5} | {h_str:>5} | {he_str:>8}")
 
     return 0
 
