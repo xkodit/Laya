@@ -6,7 +6,7 @@ import {
   stepCountIs,
   type UIMessage,
 } from "ai";
-import { xai } from "@ai-sdk/xai";
+import { google } from "@ai-sdk/google";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
@@ -16,7 +16,7 @@ import { validateCitations } from "@/lib/chat/citations-validator";
 
 export const maxDuration = 60;
 
-const MODEL_ID = "grok-4-fast";
+const MODEL_ID = "gemini-2.5-flash";
 
 type DbMessage = {
   id: string;
@@ -190,12 +190,12 @@ export async function POST(req: Request) {
     company: profile.company,
   });
 
-  // xAI provider has no equivalent to Anthropic's ephemeral prompt
-  // cache (xAI does automatic prompt caching server-side per their docs,
-  // but it's not explicitly controlled here). Static prefix + per-user
-  // tail structure kept so the revert back to Anthropic is one line.
+  // Gemini provider has no equivalent to Anthropic's ephemeral prompt
+  // cache (Google has implicit context caching for long prompts but it's
+  // not explicitly controlled here). Static prefix + per-user tail structure
+  // kept so the revert back to Anthropic is one line.
   const result = streamText({
-    model: xai(MODEL_ID),
+    model: google(MODEL_ID),
     system: [
       {
         role: "system",
