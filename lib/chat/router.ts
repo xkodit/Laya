@@ -2,16 +2,21 @@ import "server-only";
 
 // Whole-conversation router. Picks a model per user turn based on the
 // shape of the message. Premise (per session 2026-05-27 cheap-model
-// experiments): Gemini Flash 2.5 holds discipline on short factual
-// questions but skips the search tool + misses overtime axes on long
-// detailed individual-situation messages (Q21 M3-class). Sonnet 4.6
-// stays the validated baseline for those high-stakes turns.
+// experiments): the cheap branch holds discipline on short factual
+// questions but degrades on long detailed individual-situation messages
+// (Q21 M3-class). Sonnet 4.6 stays the validated baseline for those
+// high-stakes turns.
+//
+// Cheap branch is currently Grok 4 Fast (swapped in from Gemini Flash
+// 2.5 after Gemini hit a rule-count ceiling on Q4 standard-before-
+// exception). Swap-friendly: only the model wiring in route.ts changes
+// when the cheap branch is replaced; this router file stays the same.
 //
 // v1 is a deterministic regex/length classifier. No LLM call. Can swap
 // to a model-based classifier later if false-positive/negative rates
 // become problematic.
 
-export type RouteDecision = "gemini" | "sonnet";
+export type RouteDecision = "grok" | "sonnet";
 
 // Adversarial / bilateral-honesty triggers — Sonnet's reframe behavior
 // (spec §6.4) is hard to replicate cheaply. Catch discrimination,
@@ -41,6 +46,6 @@ export function routeMessage(text: string): RouteDecision {
   // Adversarial / discrimination axis → Sonnet regardless of length
   if (ADVERSARIAL_PATTERNS.some((r) => r.test(t))) return "sonnet";
 
-  // Default: short general/factual → Gemini
-  return "gemini";
+  // Default: short general/factual → cheap branch (Grok)
+  return "grok";
 }

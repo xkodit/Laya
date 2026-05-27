@@ -6,7 +6,7 @@ import {
   stepCountIs,
   type UIMessage,
 } from "ai";
-import { google } from "@ai-sdk/google";
+import { xai } from "@ai-sdk/xai";
 import { anthropic } from "@ai-sdk/anthropic";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
@@ -21,7 +21,7 @@ import { routeMessage } from "@/lib/chat/router";
 
 export const maxDuration = 60;
 
-const GEMINI_MODEL_ID = "gemini-2.5-flash";
+const GROK_MODEL_ID = "grok-4-fast";
 const SONNET_MODEL_ID = "claude-sonnet-4-6";
 
 type DbMessage = {
@@ -198,8 +198,8 @@ export async function POST(req: Request) {
 
   // Whole-conversation routing (spec §0 "post-validation cycle"):
   // long detailed / individual-situation / adversarial messages →
-  // Sonnet 4.6 (validated baseline). Short general/factual → Gemini
-  // Flash 2.5 (cost-viable for closed beta).
+  // Sonnet 4.6 (validated baseline). Short general/factual →
+  // Grok 4 Fast (cost-viable cheap branch for closed beta).
   const route = routeMessage(userInputText);
   console.info(
     `[chat] route=${route} len=${userInputText.length} convo=${conversationId}`,
@@ -207,9 +207,9 @@ export async function POST(req: Request) {
 
   // Sonnet supports ephemeral prompt caching on the static prefix —
   // 90% discount on the ~3,500-token static block for any call within
-  // the 5-min TTL. Gemini has implicit caching server-side, no explicit
-  // controls.
-  const model = route === "sonnet" ? anthropic(SONNET_MODEL_ID) : google(GEMINI_MODEL_ID);
+  // the 5-min TTL. xAI does automatic server-side prompt caching per
+  // their docs but it's not explicitly controlled here.
+  const model = route === "sonnet" ? anthropic(SONNET_MODEL_ID) : xai(GROK_MODEL_ID);
   const systemBlocks =
     route === "sonnet"
       ? [
