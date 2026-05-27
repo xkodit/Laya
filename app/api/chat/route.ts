@@ -6,7 +6,7 @@ import {
   stepCountIs,
   type UIMessage,
 } from "ai";
-import { google } from "@ai-sdk/google";
+import { deepseek } from "@ai-sdk/deepseek";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
@@ -16,7 +16,7 @@ import { validateCitations } from "@/lib/chat/citations-validator";
 
 export const maxDuration = 60;
 
-const MODEL_ID = "gemini-2.5-flash";
+const MODEL_ID = "deepseek-chat";
 
 type DbMessage = {
   id: string;
@@ -190,11 +190,12 @@ export async function POST(req: Request) {
     company: profile.company,
   });
 
-  // Google Gemini provider has no equivalent to Anthropic's ephemeral
-  // prompt cache. Static prefix + per-user tail structure kept so the
-  // revert back to Anthropic is one line.
+  // DeepSeek provider has no equivalent to Anthropic's ephemeral prompt
+  // cache (DeepSeek does cache automatically server-side, but it's not
+  // explicitly controlled here). Static prefix + per-user tail structure
+  // kept so the revert back to Anthropic is one line.
   const result = streamText({
-    model: google(MODEL_ID),
+    model: deepseek(MODEL_ID),
     system: [
       {
         role: "system",
