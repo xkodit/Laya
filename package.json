@@ -14,6 +14,7 @@
     "@ai-sdk/google": "^3.0.79",
     "@ai-sdk/mistral": "^3.0.37",
     "@ai-sdk/react": "^3.0.193",
+    "@ai-sdk/xai": "^3.0.92",
     "@react-pdf/renderer": "^4.5.1",
     "@supabase/ssr": "^0.10.3",
     "@supabase/supabase-js": "^2.106.1",
