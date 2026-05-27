@@ -100,3 +100,58 @@ export function validateCitations(
 
   return { total, matched, unmatched };
 }
+
+/**
+ * Strip the brackets from any citation that doesn't resolve to a chunk
+ * retrieved this turn. Inner text is kept (so "[Art. 13.1]" becomes the
+ * plain text "Art. 13.1"), which preserves the model's reasoning trail
+ * but removes the false promise of a clickable source.
+ *
+ * Same matching algorithm as validateCitations() — identical exact /
+ * hierarchical / doc fallback logic. Brackets that resolve are left
+ * untouched so the client renderer can still turn them into badges.
+ */
+export function stripUnmatchedCitations(
+  text: string,
+  chunks: ChunkLike[],
+): string {
+  const byArticle = new Set<string>();
+  const byDoc = new Set<string>();
+  for (const c of chunks) {
+    if (c.article) {
+      const key = normalize(c.article);
+      if (key) byArticle.add(key);
+    }
+    if (c.doc) {
+      const key = normalize(c.doc);
+      if (key) byDoc.add(key);
+    }
+  }
+
+  return text.replace(CITATION_REGEX, (match) => {
+    const inner = match.slice(1, -1);
+    const articlePart = inner.split(",")[0]!.trim();
+    const articleKey = normalize(articlePart);
+
+    let hit = false;
+    if (articleKey) {
+      if (byArticle.has(articleKey)) {
+        hit = true;
+      } else {
+        for (const k of byArticle) {
+          if (k.startsWith(`${articleKey}-`) || articleKey.startsWith(`${k}-`)) {
+            hit = true;
+            break;
+          }
+        }
+      }
+    }
+
+    if (!hit) {
+      const fullKey = normalize(inner);
+      if (fullKey && byDoc.has(fullKey)) hit = true;
+    }
+
+    return hit ? match : inner;
+  });
+}

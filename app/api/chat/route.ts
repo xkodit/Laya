@@ -7,16 +7,22 @@ import {
   type UIMessage,
 } from "ai";
 import { google } from "@ai-sdk/google";
+import { anthropic } from "@ai-sdk/anthropic";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { STATIC_SYSTEM_PROMPT, buildUserContext } from "@/lib/chat/system-prompt";
 import { searchLaborCode, formatChunksForModel } from "@/lib/chat/retrieval";
-import { validateCitations } from "@/lib/chat/citations-validator";
+import {
+  validateCitations,
+  stripUnmatchedCitations,
+} from "@/lib/chat/citations-validator";
+import { routeMessage } from "@/lib/chat/router";
 
 export const maxDuration = 60;
 
-const MODEL_ID = "gemini-2.5-flash";
+const GEMINI_MODEL_ID = "gemini-2.5-flash";
+const SONNET_MODEL_ID = "claude-sonnet-4-6";
 
 type DbMessage = {
   id: string;
@@ -190,22 +196,49 @@ export async function POST(req: Request) {
     company: profile.company,
   });
 
-  // Gemini provider has no equivalent to Anthropic's ephemeral prompt
-  // cache (Google has implicit context caching for long prompts but it's
-  // not explicitly controlled here). Static prefix + per-user tail structure
-  // kept so the revert back to Anthropic is one line.
+  // Whole-conversation routing (spec §0 "post-validation cycle"):
+  // long detailed / individual-situation / adversarial messages →
+  // Sonnet 4.6 (validated baseline). Short general/factual → Gemini
+  // Flash 2.5 (cost-viable for closed beta).
+  const route = routeMessage(userInputText);
+  console.info(
+    `[chat] route=${route} len=${userInputText.length} convo=${conversationId}`,
+  );
+
+  // Sonnet supports ephemeral prompt caching on the static prefix —
+  // 90% discount on the ~3,500-token static block for any call within
+  // the 5-min TTL. Gemini has implicit caching server-side, no explicit
+  // controls.
+  const model = route === "sonnet" ? anthropic(SONNET_MODEL_ID) : google(GEMINI_MODEL_ID);
+  const systemBlocks =
+    route === "sonnet"
+      ? [
+          {
+            role: "system" as const,
+            content: STATIC_SYSTEM_PROMPT,
+            providerOptions: {
+              anthropic: { cacheControl: { type: "ephemeral" } },
+            },
+          },
+          {
+            role: "system" as const,
+            content: userContext,
+          },
+        ]
+      : [
+          {
+            role: "system" as const,
+            content: STATIC_SYSTEM_PROMPT,
+          },
+          {
+            role: "system" as const,
+            content: userContext,
+          },
+        ];
+
   const result = streamText({
-    model: google(MODEL_ID),
-    system: [
-      {
-        role: "system",
-        content: STATIC_SYSTEM_PROMPT,
-      },
-      {
-        role: "system",
-        content: userContext,
-      },
-    ],
+    model,
+    system: systemBlocks,
     messages: await convertToModelMessages(uiMessages),
     tools: { search_labor_code: searchTool },
     stopWhen: stepCountIs(8),
@@ -273,22 +306,35 @@ export async function POST(req: Request) {
         }
       }
 
+      // Strip unmatched citations from assistant content before persisting:
+      // any `[Art. X]` that didn't resolve to a chunk retrieved this turn
+      // becomes plain text (brackets removed, inner kept). Persisted DB
+      // content is clean; the live stream the user already saw is not
+      // touched (full pre-stream filtering would require buffering the
+      // whole response and lose progressive streaming).
       const toInsert = newMessages
-        .map((m, idx) => ({
-          conversation_id: conversationId,
-          role: m.role,
-          content: extractText(m),
-          tool_calls:
+        .map((m, idx) => {
+          const rawContent = extractText(m);
+          const content =
             m.role === "assistant"
-              ? (extractToolCalls(m) as unknown as object)
-              : null,
-          citations:
-            m.role === "assistant"
-              ? (extractCitedChunks(m) as unknown as object)
-              : null,
-          input_tokens: idx === lastAssistantIdx ? inputTokens : null,
-          output_tokens: idx === lastAssistantIdx ? outputTokens : null,
-        }))
+              ? stripUnmatchedCitations(rawContent, turnChunks)
+              : rawContent;
+          return {
+            conversation_id: conversationId,
+            role: m.role,
+            content,
+            tool_calls:
+              m.role === "assistant"
+                ? (extractToolCalls(m) as unknown as object)
+                : null,
+            citations:
+              m.role === "assistant"
+                ? (extractCitedChunks(m) as unknown as object)
+                : null,
+            input_tokens: idx === lastAssistantIdx ? inputTokens : null,
+            output_tokens: idx === lastAssistantIdx ? outputTokens : null,
+          };
+        })
         .filter((r) => r.content.length > 0 || r.role === "assistant");
 
       if (toInsert.length > 0) {
