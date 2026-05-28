@@ -38,9 +38,22 @@ let memo: { name: string; expiresAtMs: number; cachedAtMs: number } | null =
   null;
 let inflight: Promise<string | null> | null = null;
 
+// DISABLED 2026-05-28 after a production incident (AI_APICallError on every
+// Gemini turn). Gemini rejects a generateContent request that sets
+// `cachedContent` alongside a request-level `systemInstruction` and `tools`.
+// Our systemInstruction (userContext + rolling summary) is per-user/dynamic so
+// it can't live in the cached resource, and the search tool must stay in the
+// request for the AI SDK to execute it — so explicit context caching is
+// incompatible with this request shape. It was also net-negative ROI at
+// closed-beta scale (storage ~$2.52/mo > per-call savings). Returning null
+// makes the route fall back to the validated uncached Gemini path. Set
+// GEMINI_CONTEXT_CACHE=1 to re-enable once the request shape is reworked.
+const GEMINI_CONTEXT_CACHE_ENABLED = process.env.GEMINI_CONTEXT_CACHE === "1";
+
 // Returns a `cachedContents/{id}` reference, or null if caching is unavailable
 // (no API key, creation failed, …) — callers fall back to the uncached path.
 export async function ensureGeminiCachedContent(): Promise<string | null> {
+  if (!GEMINI_CONTEXT_CACHE_ENABLED) return null;
   const now = Date.now();
   if (
     memo &&
