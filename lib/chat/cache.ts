@@ -13,6 +13,15 @@ import type { RouteDecision } from "@/lib/chat/router";
 const SIMILARITY_THRESHOLD = 0.92;
 const TTL_DAYS = 30;
 
+// DISABLED 2026-05-28 after a prod incident: the semantic layer served one
+// cached answer (a CDD-renewal response) to many unrelated eligible queries
+// ("smig", "contrat écrit", "préavis"…) — voyage-3 cosine similarities on short
+// FR queries cluster far above 0.92, so the threshold over-matched. Confidently
+// wrong legal answers are worse than a crash. Fully off (no lookup, no write)
+// until the matching is retuned (likely exact-match-only or a much higher
+// threshold). Set RESPONSE_CACHE=1 to re-enable.
+const RESPONSE_CACHE_ENABLED = process.env.RESPONSE_CACHE === "1";
+
 // Cache key fragment: a fingerprint of the static prompt + cheap model. When
 // either changes, every prior entry stops matching (lookup filters on this
 // hash) and ages out via TTL — so prompt tuning / model swaps self-invalidate.
@@ -77,6 +86,7 @@ const FIRST_PERSON_RE =
 // Eligibility is composed with the router: only the cheap (Gemini) branch —
 // long/individual-situation/adversarial turns route to Sonnet and never cache.
 export function isCacheEligible(text: string, route: RouteDecision): boolean {
+  if (!RESPONSE_CACHE_ENABLED) return false;
   if (route !== "gemini") return false;
   if (/\d/.test(text)) return false;
   if (FIRST_PERSON_RE.test(text)) return false;
