@@ -4,6 +4,8 @@ import {
   streamText,
   tool,
   stepCountIs,
+  createUIMessageStream,
+  createUIMessageStreamResponse,
   type UIMessage,
 } from "ai";
 import { google } from "@ai-sdk/google";
@@ -12,17 +14,30 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { STATIC_SYSTEM_PROMPT, buildUserContext } from "@/lib/chat/system-prompt";
-import { searchLaborCode, formatChunksForModel } from "@/lib/chat/retrieval";
+import {
+  voyageEmbed,
+  searchLaborCode,
+  formatChunksForModel,
+} from "@/lib/chat/retrieval";
+import { summarizeConversation } from "@/lib/chat/summarize";
 import {
   validateCitations,
   stripUnmatchedCitations,
 } from "@/lib/chat/citations-validator";
 import { routeMessage } from "@/lib/chat/router";
+import { GEMINI_MODEL_ID, SONNET_MODEL_ID } from "@/lib/chat/models";
+import { ensureGeminiCachedContent } from "@/lib/chat/gemini-cache";
+import {
+  isCacheEligible,
+  normalizeQuery,
+  canonicalizeQuery,
+  lookupCachedResponse,
+  writeCachedResponse,
+  bumpCacheHit,
+  bumpQueryFrequency,
+} from "@/lib/chat/cache";
 
 export const maxDuration = 60;
-
-const GEMINI_MODEL_ID = "gemini-2.5-flash";
-const SONNET_MODEL_ID = "claude-sonnet-4-6";
 
 type DbMessage = {
   id: string;
@@ -88,6 +103,33 @@ function extractCitedChunks(message: UIMessage): RetrievedChunkOutput[] {
   return out;
 }
 
+// Smalltalk interception — short greetings / acknowledgements don't need a
+// model call. Returns the canned reply (with the user's first name) or null
+// if the turn should go to the model. Condition: < 4 words AND matches a
+// greeting or thanks token. Keeps a real legal question like "ok et le
+// préavis ?" (≥ 4 words) on the model path.
+const GREETING_RE = /\b(bonjour|bonsoir|salut|coucou|hello|hey)\b/i;
+const THANKS_RE = /\b(merci|thanks|ok|okay|super|parfait|nickel|top|g[ée]nial)\b/i;
+
+function cannedSmalltalkReply(
+  text: string,
+  firstName: string,
+): string | null {
+  const t = text.trim();
+  if (t.length === 0) return null;
+  if (t.split(/\s+/).length >= 4) return null;
+
+  const isGreeting = GREETING_RE.test(t);
+  const isThanks = THANKS_RE.test(t);
+  if (!isGreeting && !isThanks) return null;
+
+  // Greeting wins if both are present (e.g. "salut merci").
+  if (isGreeting) {
+    return `Bonjour ${firstName}, je suis Laya, votre assistante en droit du travail ivoirien. Posez-moi votre question — par exemple sur un contrat, un licenciement, des congés payés ou la durée du travail.`;
+  }
+  return `Avec plaisir, ${firstName} ! Si vous avez une autre question sur le droit du travail ivoirien, je suis là.`;
+}
+
 export async function POST(req: Request) {
   const body = (await req.json()) as {
     id: string;
@@ -144,7 +186,7 @@ export async function POST(req: Request) {
   // Verify ownership (returns null if not ours)
   const { data: convo } = await supabase
     .from("conversations")
-    .select("id, user_id, title")
+    .select("id, user_id, title, summary, summary_through_message_id")
     .eq("id", conversationId)
     .eq("user_id", user.id)
     .single();
@@ -159,19 +201,107 @@ export async function POST(req: Request) {
     .eq("conversation_id", conversationId)
     .order("created_at", { ascending: true });
 
-  // Cap the conversation history we send to the model. Caps per-turn input
-  // tokens at a roughly stable budget regardless of conversation length
-  // (otherwise input tokens grow linearly per turn). All messages still
-  // persist to the DB; only the model's view is capped. Spec §7.4 sliding-
-  // window summarization will replace this with summarization later.
-  const HISTORY_MESSAGE_CAP = 6; // 3 user+assistant turns
-  const priorUi = dbMessagesToUi((priorRows ?? []) as DbMessage[]);
-  const cappedPriorUi = priorUi.slice(-HISTORY_MESSAGE_CAP);
+  // Sliding-window context (spec §7.4). Everything up to and including
+  // `summary_through_message_id` is represented by the rolling `summary`
+  // (injected as a system block below); only the messages AFTER that point
+  // are sent verbatim. Caps per-turn input tokens regardless of conversation
+  // length while preserving the older context in compacted form. All messages
+  // still persist to the DB in full — this only shapes the model's view.
+  const allRows = (priorRows ?? []) as DbMessage[];
+  const convoSummary = convo.summary ?? null;
+  const summaryThroughId = convo.summary_through_message_id ?? null;
+
+  let windowRows = allRows;
+  if (convoSummary && summaryThroughId) {
+    const idx = allRows.findIndex((r) => r.id === summaryThroughId);
+    if (idx >= 0) windowRows = allRows.slice(idx + 1);
+  }
+  // Backstop: if summarization has been failing, the uncovered tail can grow
+  // unbounded. Cap it so input tokens can't run away (loses oldest verbatim
+  // context, mirroring the pre-summary truncation). The summary still carries
+  // the older turns when present.
+  const MAX_WINDOW = 12;
+  if (windowRows.length > MAX_WINDOW) windowRows = windowRows.slice(-MAX_WINDOW);
+
+  // Anthropic requires the first message to be a user message. If the window
+  // boundary (summary cutoff or MAX_WINDOW slice) lands on an assistant turn,
+  // drop leading assistant rows — their gist is already in the summary, and
+  // the incoming user message always follows the window.
+  while (windowRows.length > 0 && windowRows[0].role !== "user") {
+    windowRows = windowRows.slice(1);
+  }
+
+  const cappedPriorUi = dbMessagesToUi(windowRows);
   const uiMessages: UIMessage[] = [...cappedPriorUi, incomingMessage];
+
+  // Trigger threshold for recomputing the rolling summary in onFinish.
+  const LIVE_WINDOW = 6;
+
+  // Shared fast-path responder: stream a fixed assistant text (smalltalk reply
+  // or cache hit) as the turn, persist both turns + bump updated_at, no model
+  // call. `citations` is attached to the assistant row (null for smalltalk,
+  // the cached chunks for a cache hit) so badges resolve on reload.
+  const fixedTextResponse = (
+    text: string,
+    citations: object | null,
+    routeLabel: string,
+  ): Response => {
+    console.info(
+      `[chat] route=${routeLabel} len=${userInputText.length} convo=${conversationId}`,
+    );
+    const stream = createUIMessageStream<UIMessage>({
+      originalMessages: uiMessages,
+      execute: ({ writer }) => {
+        const id = "fixed";
+        writer.write({ type: "text-start", id });
+        writer.write({ type: "text-delta", id, delta: text });
+        writer.write({ type: "text-end", id });
+      },
+      onFinish: async ({ messages }) => {
+        const service = createServiceClient();
+        const newMessages = messages.slice(cappedPriorUi.length);
+        const toInsert = newMessages
+          .map((m) => ({
+            conversation_id: conversationId,
+            role: m.role,
+            content: extractText(m),
+            tool_calls: null,
+            citations: m.role === "assistant" ? citations : null,
+            input_tokens: null,
+            output_tokens: null,
+          }))
+          .filter((r) => r.content.length > 0);
+        if (toInsert.length > 0) {
+          const { error: insertError } = await service
+            .from("messages")
+            .insert(toInsert);
+          if (insertError) {
+            console.error(
+              "[chat] failed to persist fixed response",
+              insertError,
+            );
+          }
+        }
+        await supabase
+          .from("conversations")
+          .update({ updated_at: new Date().toISOString() })
+          .eq("id", conversationId);
+      },
+    });
+    return createUIMessageStreamResponse({ stream });
+  };
+
+  // Smalltalk fast-path: intercept greetings / acknowledgements before any
+  // model call. Zero tokens consumed, so no usage_events row is logged.
+  const firstName = profile.full_name.split(/\s+/)[0] || profile.full_name;
+  const canned = cannedSmalltalkReply(userInputText, firstName);
+  if (canned) {
+    return fixedTextResponse(canned, null, "canned");
+  }
 
   const searchTool = tool({
     description:
-      "Recherche dans le Code du travail ivoirien et les textes officiels. À utiliser dès qu'une question demande un fait juridique précis. Tu peux l'appeler jusqu'à 5 fois par tour en reformulant la requête entre chaque appel.",
+      "Recherche dans le Code du travail ivoirien et les textes officiels. À utiliser dès qu'une question demande un fait juridique précis. Tu peux l'appeler jusqu'à 3 fois par tour en reformulant la requête entre chaque appel.",
     inputSchema: z.object({
       query: z
         .string()
@@ -205,11 +335,64 @@ export async function POST(req: Request) {
     `[chat] route=${route} len=${userInputText.length} convo=${conversationId}`,
   );
 
-  // Sonnet supports ephemeral prompt caching on the static prefix —
-  // 90% discount on the ~3,500-token static block for any call within
-  // the 5-min TTL. Gemini has implicit context caching server-side,
-  // no explicit controls.
+  // Semantic response cache (spec §0 grill, Build 2). Eligible turns are the
+  // cheap-branch general questions (no first-person, no digits) — see
+  // isCacheEligible. On a hit, skip the model + retrieval entirely. On a miss,
+  // keep the embedding so onFinish can populate the cache without re-embedding.
+  let cacheCtx: { normKey: string; embedding: number[] } | null = null;
+  if (isCacheEligible(userInputText, route)) {
+    const normKey = canonicalizeQuery(normalizeQuery(userInputText));
+    try {
+      const embedding = await voyageEmbed(normKey);
+      const hit = await lookupCachedResponse(
+        normKey,
+        profile.user_type,
+        embedding,
+      );
+      if (hit) {
+        await bumpCacheHit(hit.id);
+        await bumpQueryFrequency(normKey, profile.user_type);
+        return fixedTextResponse(
+          hit.responseText,
+          (hit.retrievedChunks as object) ?? null,
+          `cache-${hit.kind}`,
+        );
+      }
+      cacheCtx = { normKey, embedding };
+    } catch (err) {
+      console.error("[chat] cache lookup error", err);
+    }
+  }
+
+  // Sonnet supports ephemeral prompt caching on the static prefix — 90%
+  // discount on the ~3,500-token static block for any call within the 5-min
+  // TTL. Gemini uses explicit context caching (Build 3): the static prompt
+  // lives in a cached `contents` resource, so when a reference is available we
+  // drop the static system block and reference the cache instead. null →
+  // caching unavailable, fall back to sending the static block inline.
   const model = route === "sonnet" ? anthropic(SONNET_MODEL_ID) : google(GEMINI_MODEL_ID);
+  const geminiCacheName =
+    route === "gemini" ? await ensureGeminiCachedContent() : null;
+  if (route === "gemini") {
+    console.info(
+      `[chat] gemini-context-cache=${geminiCacheName ? "hit" : "uncached"} convo=${conversationId}`,
+    );
+  }
+
+  // Rolling summary injected as a separate (uncached) system block. Kept out
+  // of STATIC_SYSTEM_PROMPT so the cached Sonnet prefix stays byte-identical
+  // across turns; kept out of the messages array so it can't break Anthropic's
+  // "first message must be user" / role-alternation constraints. Self-describing
+  // so the model treats it as memory, not as content to quote.
+  const summaryBlock = convoSummary
+    ? [
+        {
+          role: "system" as const,
+          content: `Résumé des tours précédents de cette conversation (mémoire interne — ne le cite pas, n'y fais pas référence explicitement, ne le répète pas) :\n\n${convoSummary}`,
+        },
+      ]
+    : [];
+
   const systemBlocks =
     route === "sonnet"
       ? [
@@ -224,24 +407,39 @@ export async function POST(req: Request) {
             role: "system" as const,
             content: userContext,
           },
+          ...summaryBlock,
         ]
-      : [
-          {
-            role: "system" as const,
-            content: STATIC_SYSTEM_PROMPT,
-          },
-          {
-            role: "system" as const,
-            content: userContext,
-          },
-        ];
+      : geminiCacheName
+        ? [
+            // Static prompt is in the Gemini context cache — only the dynamic
+            // blocks go in systemInstruction here.
+            {
+              role: "system" as const,
+              content: userContext,
+            },
+            ...summaryBlock,
+          ]
+        : [
+            {
+              role: "system" as const,
+              content: STATIC_SYSTEM_PROMPT,
+            },
+            {
+              role: "system" as const,
+              content: userContext,
+            },
+            ...summaryBlock,
+          ];
 
   const result = streamText({
     model,
     system: systemBlocks,
     messages: await convertToModelMessages(uiMessages),
     tools: { search_labor_code: searchTool },
-    stopWhen: stepCountIs(8),
+    stopWhen: stepCountIs(4),
+    providerOptions: geminiCacheName
+      ? { google: { cachedContent: geminiCacheName } }
+      : undefined,
   });
 
   // Ensure the stream is consumed even on client disconnect so onFinish runs
@@ -337,8 +535,8 @@ export async function POST(req: Request) {
         })
         .filter((r) => r.content.length > 0 || r.role === "assistant");
 
+      const service = createServiceClient();
       if (toInsert.length > 0) {
-        const service = createServiceClient();
         const { error: insertError } = await service
           .from("messages")
           .insert(toInsert);
@@ -369,6 +567,57 @@ export async function POST(req: Request) {
         .from("conversations")
         .update({ updated_at: new Date().toISOString() })
         .eq("id", conversationId);
+
+      // Populate the response cache on an eligible miss (reuse the lookup
+      // embedding). Store the CLEANED assistant text (same strip applied to the
+      // persisted message) + cited chunks, so the next identical / near-identical
+      // query is served without a model call. Frequency is bumped for every
+      // eligible turn (hit or miss) to feed demand analytics.
+      if (cacheCtx) {
+        await bumpQueryFrequency(cacheCtx.normKey, profile.user_type);
+        if (lastAssistantText.length > 0) {
+          await writeCachedResponse({
+            normKey: cacheCtx.normKey,
+            userType: profile.user_type,
+            embedding: cacheCtx.embedding,
+            responseText: stripUnmatchedCitations(lastAssistantText, turnChunks),
+            retrievedChunks: turnChunks,
+          });
+        }
+      }
+
+      // Sliding-window summarization (spec §7.4): once the conversation
+      // exceeds the live window, recompute a rolling summary covering
+      // everything except the last LIVE_WINDOW messages. Wholesale
+      // re-summarization each trigger (fresh perspective, avoids the framing
+      // drift of incremental summaries). On failure, leaves the previous
+      // summary in place — the model-window backstop cap covers tail growth.
+      const { data: freshRows } = await service
+        .from("messages")
+        .select("id, role, content, created_at")
+        .eq("conversation_id", conversationId)
+        .order("created_at", { ascending: true });
+      if (freshRows && freshRows.length > LIVE_WINDOW) {
+        const toCompact = freshRows.slice(0, freshRows.length - LIVE_WINDOW);
+        const throughId = toCompact[toCompact.length - 1].id;
+        const transcript = toCompact
+          .filter((r) => r.role === "user" || r.role === "assistant")
+          .map(
+            (r) =>
+              `${r.role === "user" ? "Utilisateur" : "Laya"}: ${r.content}`,
+          )
+          .join("\n\n");
+        const summary = await summarizeConversation(transcript);
+        if (summary) {
+          await service
+            .from("conversations")
+            .update({
+              summary,
+              summary_through_message_id: throughId,
+            })
+            .eq("id", conversationId);
+        }
+      }
     },
   });
 }

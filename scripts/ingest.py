@@ -500,6 +500,35 @@ def mark_processing(supabase: Client, document_id: str) -> None:
     supabase.table("documents").update({"status": "processing"}).eq("id", document_id).execute()
 
 
+# Canonical doc labels — keep in sync with DOC_LABEL in lib/chat/retrieval.ts.
+# Used to selectively invalidate the response cache when a document is
+# (re)ingested. Keyed on the canonical label (stable across re-ingest) rather
+# than chunk ids (which change on re-ingest and are truncated in the cache).
+DOC_LABEL = {
+    "Loi n° 2015-532": "Loi 2015-532",
+    "Décret n° 2024-898": "Décret 2024-898",
+    "19-juillet-1977-entre-AICI-et-UGTCI": "Convention AICI/UGTCI 1977",
+    "2024-902": "Décret 2024-902",
+    "CIV-57048": "Code Prévoyance Sociale",
+    "N° 96-197": "Décret 96-197",
+}
+
+
+def invalidate_response_cache(supabase: Client, reference: str | None) -> None:
+    """Drop cached chat responses that cited this document. Best-effort — never
+    fails an ingest if the cache table/RPC isn't deployed yet."""
+    if not reference:
+        return
+    label = DOC_LABEL.get(reference, reference)
+    try:
+        res = supabase.rpc(
+            "invalidate_cache_by_doc_labels", {"labels": [label]}
+        ).execute()
+        print(f"  → response cache invalidated for '{label}' (deleted={res.data})")
+    except Exception as exc:  # noqa: BLE001
+        print(f"  → cache invalidation skipped ({exc})", file=sys.stderr)
+
+
 def download_from_storage(supabase: Client, storage_path: str) -> Path:
     """Pull a corpus PDF down to a temp file and return the local path."""
     data = supabase.storage.from_("corpus").download(storage_path)
@@ -562,6 +591,7 @@ def process_one_pending(supabase: Client, doc: dict) -> bool:
         embed_chunks(chunks)
         insert_chunks(supabase, doc_id, chunks)
         mark_ready(supabase, doc_id)
+        invalidate_response_cache(supabase, doc.get("reference"))
         print(f"  ✓ ready ({len(chunks)} chunks)")
         return True
 
@@ -768,6 +798,7 @@ def main() -> int:
         embed_chunks(chunks)
         insert_chunks(supabase, doc_id, chunks)
         mark_ready(supabase, doc_id)
+        invalidate_response_cache(supabase, args.reference)
     except Exception as exc:
         mark_failed(supabase, doc_id)
         print(f"Ingestion failed, marked document as 'failed': {exc}", file=sys.stderr)

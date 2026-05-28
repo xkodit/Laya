@@ -15,7 +15,10 @@ export type RetrievedChunk = {
 };
 
 const CANDIDATE_COUNT = 20;
-const TOP_K = 6;
+// rerank-2.5 already promotes the strongest chunks; 4-6 are diminishing-
+// value tail. Needs Hadi re-V&V on multi-article axes (Q11/Q17/Q19)
+// before opening to testers #2-5.
+const TOP_K = 3;
 const VOYAGE_API = "https://api.voyageai.com/v1";
 
 // Deterministic query expansion: bridge the gap between user
@@ -52,7 +55,7 @@ function expandQuery(query: string): string {
   return expanded;
 }
 
-async function voyageEmbed(query: string): Promise<number[]> {
+export async function voyageEmbed(query: string): Promise<number[]> {
   const res = await fetch(`${VOYAGE_API}/embeddings`, {
     method: "POST",
     headers: {
