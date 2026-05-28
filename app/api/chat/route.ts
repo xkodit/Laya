@@ -36,6 +36,8 @@ import {
   bumpCacheHit,
   bumpQueryFrequency,
 } from "@/lib/chat/cache";
+import { captureChatTurn, captureZeroCostTurn } from "@/lib/llm/capture";
+import { randomUUID } from "crypto";
 
 export const maxDuration = 60;
 
@@ -166,6 +168,10 @@ export async function POST(req: Request) {
   // no-op if it already exists (we upsert by id). RLS guarantees we can only
   // touch our own rows.
   const userInputText = extractText(incomingMessage);
+  // One id per user turn — groups all provider calls (multi-step tool use) of
+  // this turn in llm_calls, and is stamped on the persisted message rows so the
+  // cost drill-down can show the question text.
+  const questionId = randomUUID();
   const autoTitle =
     userInputText.length > 0
       ? userInputText.slice(0, 60) + (userInputText.length > 60 ? "…" : "")
@@ -245,6 +251,8 @@ export async function POST(req: Request) {
     text: string,
     citations: object | null,
     routeLabel: string,
+    outcome: "cached" | "no_llm_call",
+    cacheHit: boolean,
   ): Response => {
     console.info(
       `[chat] route=${routeLabel} len=${userInputText.length} convo=${conversationId}`,
@@ -263,12 +271,11 @@ export async function POST(req: Request) {
         const toInsert = newMessages
           .map((m) => ({
             conversation_id: conversationId,
+            question_id: questionId,
             role: m.role,
             content: extractText(m),
             tool_calls: null,
             citations: m.role === "assistant" ? citations : null,
-            input_tokens: null,
-            output_tokens: null,
           }))
           .filter((r) => r.content.length > 0);
         if (toInsert.length > 0) {
@@ -286,6 +293,14 @@ export async function POST(req: Request) {
           .from("conversations")
           .update({ updated_at: new Date().toISOString() })
           .eq("id", conversationId);
+        // Log the zero-cost turn so the dashboard sees how often the
+        // optimizations fire (savings = aggregate of these vs model turns).
+        await captureZeroCostTurn({
+          conversationId,
+          questionId,
+          outcome,
+          cacheHit,
+        });
       },
     });
     return createUIMessageStreamResponse({ stream });
@@ -296,7 +311,7 @@ export async function POST(req: Request) {
   const firstName = profile.full_name.split(/\s+/)[0] || profile.full_name;
   const canned = cannedSmalltalkReply(userInputText, firstName);
   if (canned) {
-    return fixedTextResponse(canned, null, "canned");
+    return fixedTextResponse(canned, null, "canned", "no_llm_call", false);
   }
 
   const searchTool = tool({
@@ -356,6 +371,8 @@ export async function POST(req: Request) {
           hit.responseText,
           (hit.retrievedChunks as object) ?? null,
           `cache-${hit.kind}`,
+          "cached",
+          true,
         );
       }
       cacheCtx = { normKey, embedding };
@@ -431,6 +448,7 @@ export async function POST(req: Request) {
             ...summaryBlock,
           ];
 
+  const startedAt = Date.now();
   const result = streamText({
     model,
     system: systemBlocks,
@@ -492,26 +510,35 @@ export async function POST(req: Request) {
         }
       }
 
-      // Attribute the turn's token usage to the LAST assistant message
-      // in the new set (the final synthesis the user sees). Intermediate
-      // assistant steps from multi-pass tool calling stay null so
-      // SUM(input_tokens) per conversation doesn't double-count.
-      let lastAssistantIdx = -1;
-      for (let i = newMessages.length - 1; i >= 0; i--) {
-        if (newMessages[i].role === "assistant") {
-          lastAssistantIdx = i;
-          break;
-        }
-      }
+      // Track this turn's provider calls (token-tracking-spec): one llm_calls
+      // row per step, with the segment breakdown on the final step. Best-effort
+      // — never blocks persistence. Returns the turn's total $ for usage_events.
+      const segments = {
+        systemStatic: STATIC_SYSTEM_PROMPT,
+        systemDynamic:
+          userContext + (convoSummary ? `\n\n${convoSummary}` : ""),
+        history: windowRows.map((r) => r.content).join("\n\n"),
+        chunks: turnChunks.map((c) => c.content).join("\n\n"),
+        question: userInputText,
+      };
+      const steps = await result.steps;
+      const cap = await captureChatTurn({
+        provider: route,
+        model: route === "sonnet" ? SONNET_MODEL_ID : GEMINI_MODEL_ID,
+        conversationId,
+        questionId,
+        steps,
+        segments,
+        retrievedChunksCount: turnChunks.length,
+        startedAt,
+      });
 
       // Strip unmatched citations from assistant content before persisting:
       // any `[Art. X]` that didn't resolve to a chunk retrieved this turn
       // becomes plain text (brackets removed, inner kept). Persisted DB
-      // content is clean; the live stream the user already saw is not
-      // touched (full pre-stream filtering would require buffering the
-      // whole response and lose progressive streaming).
+      // content is clean; the live stream the user already saw is not touched.
       const toInsert = newMessages
-        .map((m, idx) => {
+        .map((m) => {
           const rawContent = extractText(m);
           const content =
             m.role === "assistant"
@@ -519,6 +546,7 @@ export async function POST(req: Request) {
               : rawContent;
           return {
             conversation_id: conversationId,
+            question_id: questionId,
             role: m.role,
             content,
             tool_calls:
@@ -529,8 +557,6 @@ export async function POST(req: Request) {
               m.role === "assistant"
                 ? (extractCitedChunks(m) as unknown as object)
                 : null,
-            input_tokens: idx === lastAssistantIdx ? inputTokens : null,
-            output_tokens: idx === lastAssistantIdx ? outputTokens : null,
           };
         })
         .filter((r) => r.content.length > 0 || r.role === "assistant");
@@ -544,9 +570,8 @@ export async function POST(req: Request) {
           console.error("[chat] failed to persist messages", insertError);
         }
 
-        // Log one usage_events row per chat turn (spec §13). Used for
-        // per-user analytics and Phase B quota enforcement. cost_usd
-        // stays null for now — pricing math is separate work.
+        // One usage_events row per chat turn (spec §13) — per-user/quota axis,
+        // now with cost_usd computed from the tracking pricing config.
         if (inputTokens !== null || outputTokens !== null) {
           const { error: usageError } = await service
             .from("usage_events")
@@ -555,6 +580,7 @@ export async function POST(req: Request) {
               event_type: "chat_message",
               input_tokens: inputTokens ?? 0,
               output_tokens: outputTokens ?? 0,
+              cost_usd: cap.totalCost,
             });
           if (usageError) {
             console.error("[chat] failed to log usage_events", usageError);

@@ -5,6 +5,7 @@ import Image from "next/image";
 import { usePathname } from "next/navigation";
 import {
   ArrowLeft,
+  Coins,
   FileText,
   MessageSquare,
   ThumbsUp,
@@ -18,6 +19,7 @@ const NAV_ITEMS = [
   { href: "/admin/users", label: "Utilisateurs", icon: Users },
   { href: "/admin/conversations", label: "Conversations", icon: MessageSquare },
   { href: "/admin/feedback", label: "Retours", icon: ThumbsUp },
+  { href: "/admin/costs", label: "Coûts IA", icon: Coins },
 ];
 
 type Props = {
