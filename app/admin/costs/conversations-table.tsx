@@ -56,6 +56,11 @@ export function ConversationsTable({ rows }: Props) {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [userQ, setUserQ] = useState("");
+  const [dateSort, setDateSort] = useState<"none" | "desc" | "asc">("none");
+
+  function cycleDateSort() {
+    setDateSort((d) => (d === "none" ? "desc" : d === "desc" ? "asc" : "none"));
+  }
 
   const userOptions = useMemo(() => {
     const set = new Set<string>();
@@ -67,7 +72,7 @@ export function ConversationsTable({ rows }: Props) {
 
   const filtered = useMemo(() => {
     const userQLower = userQ.trim().toLowerCase();
-    return rows.filter((r) => {
+    const matched = rows.filter((r) => {
       if (r.last_at) {
         const d = ymd(r.last_at);
         if (from && d < from) return false;
@@ -79,7 +84,13 @@ export function ConversationsTable({ rows }: Props) {
         return false;
       return true;
     });
-  }, [rows, from, to, userQ]);
+    if (dateSort === "none") return matched;
+    return [...matched].sort((a, b) => {
+      const at = a.last_at ? Date.parse(a.last_at) : 0;
+      const bt = b.last_at ? Date.parse(b.last_at) : 0;
+      return dateSort === "desc" ? bt - at : at - bt;
+    });
+  }, [rows, from, to, userQ, dateSort]);
 
   const totals = filtered.reduce(
     (acc, r) => {
@@ -132,7 +143,29 @@ export function ConversationsTable({ rows }: Props) {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="whitespace-nowrap">Date</TableHead>
+              <TableHead className="whitespace-nowrap">
+                <button
+                  type="button"
+                  onClick={cycleDateSort}
+                  className="inline-flex items-center gap-1 hover:text-foreground"
+                  title={
+                    dateSort === "none"
+                      ? "Trier par date (plus récent d'abord)"
+                      : dateSort === "desc"
+                        ? "Trier par date (plus ancien d'abord)"
+                        : "Tri par défaut (coût décroissant)"
+                  }
+                >
+                  Date
+                  <span className="text-xs tabular-nums opacity-70">
+                    {dateSort === "desc"
+                      ? "↓"
+                      : dateSort === "asc"
+                        ? "↑"
+                        : "↕"}
+                  </span>
+                </button>
+              </TableHead>
               <TableHead className="whitespace-nowrap">Utilisateur</TableHead>
               <TableHead>Conversation</TableHead>
               <TableHead className="text-right">Questions</TableHead>

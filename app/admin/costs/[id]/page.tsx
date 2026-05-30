@@ -2,14 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { createServiceClient } from "@/lib/supabase/service";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { QuestionsTable, type QuestionRow } from "./questions-table";
 
 export const dynamic = "force-dynamic";
 
@@ -26,7 +19,7 @@ function tk(v: number): string {
   return Math.round(v).toLocaleString("fr-FR");
 }
 
-type QRow = {
+type QRowDb = {
   question_id: string;
   asked_at: string;
   call_outcome: string;
@@ -75,7 +68,7 @@ export default async function CostDrilldownPage({
       .eq("role", "user"),
   ]);
 
-  const qRows = (qRowsRaw ?? []) as unknown as QRow[];
+  const qRowsDb = (qRowsRaw ?? []) as unknown as QRowDb[];
   const questionText = new Map<string, string>();
   for (const m of (msgRows ?? []) as {
     question_id: string | null;
@@ -84,17 +77,32 @@ export default async function CostDrilldownPage({
     if (m.question_id) questionText.set(m.question_id, m.content);
   }
 
+  const rows: QuestionRow[] = qRowsDb.map((r) => ({
+    question_id: r.question_id,
+    asked_at: r.asked_at,
+    call_outcome: r.call_outcome,
+    models: r.models,
+    output_tokens: n(r.output_tokens),
+    total_tokens: n(r.total_tokens),
+    total_cost: n(r.total_cost),
+    reason: r.reason,
+    retrieved_chunks_count: r.retrieved_chunks_count,
+    retrieved_chunks_tokens: r.retrieved_chunks_tokens,
+    history_tokens: r.history_tokens,
+    system_prompt_tokens: r.system_prompt_tokens,
+    user_question_tokens: r.user_question_tokens,
+    question_text: questionText.get(r.question_id) ?? "—",
+  }));
+
   // Entrée = all input-billed tokens (non-cached + cache read + cache write),
   // derived as total - output so it reconciles by construction with the
   // header total and with each row's total_tokens.
-  const totals = qRows.reduce(
+  const totals = rows.reduce(
     (acc, r) => {
-      const total = n(r.total_tokens);
-      const output = n(r.output_tokens);
-      acc.input += total - output;
-      acc.output += output;
-      acc.total += total;
-      acc.cost += n(r.total_cost);
+      acc.input += r.total_tokens - r.output_tokens;
+      acc.output += r.output_tokens;
+      acc.total += r.total_tokens;
+      acc.cost += r.total_cost;
       return acc;
     },
     { input: 0, output: 0, total: 0, cost: 0 },
@@ -116,103 +124,19 @@ export default async function CostDrilldownPage({
           {conversation.title ?? "Sans titre"}
         </h1>
         <p className="text-sm text-muted-foreground">
-          {qRows.length} question{qRows.length === 1 ? "" : "s"} ·{" "}
+          {rows.length} question{rows.length === 1 ? "" : "s"} ·{" "}
           {tk(totals.total)} tokens · {usd(totals.cost)}
         </p>
       </header>
 
-      <div className="overflow-hidden rounded-lg border border-border bg-background">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-[40%]">Question</TableHead>
-              <TableHead>Modèle</TableHead>
-              <TableHead className="text-right">Entrée</TableHead>
-              <TableHead className="text-right">Sortie</TableHead>
-              <TableHead className="text-right">Coût</TableHead>
-              <TableHead>Raison</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {qRows.length === 0 ? (
-              <TableRow>
-                <TableCell
-                  colSpan={6}
-                  className="py-10 text-center text-sm text-muted-foreground"
-                >
-                  Aucune question suivie pour cette conversation.
-                </TableCell>
-              </TableRow>
-            ) : (
-              qRows.map((r) => {
-                const model =
-                  r.models && r.models.length > 0
-                    ? r.models.join(", ")
-                    : r.call_outcome === "cached"
-                      ? "cache"
-                      : r.call_outcome === "no_llm_call"
-                        ? "—"
-                        : r.call_outcome;
-                const text = questionText.get(r.question_id) ?? "—";
-                return (
-                  <TableRow key={r.question_id} className="align-top">
-                    <TableCell className="max-w-0">
-                      <div className="line-clamp-2 text-sm">{text}</div>
-                    </TableCell>
-                    <TableCell className="whitespace-nowrap text-xs">
-                      {model}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {tk(n(r.total_tokens) - n(r.output_tokens))}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {tk(n(r.output_tokens))}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {usd(n(r.total_cost))}
-                    </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
-                      {r.reason ? (
-                        <span>
-                          {r.reason}
-                          {r.retrieved_chunks_count != null ? (
-                            <span className="mt-0.5 block opacity-70">
-                              ctx {tk(n(r.retrieved_chunks_tokens))} · hist{" "}
-                              {tk(n(r.history_tokens))} · sys{" "}
-                              {tk(n(r.system_prompt_tokens))} · q{" "}
-                              {tk(n(r.user_question_tokens))}
-                            </span>
-                          ) : null}
-                        </span>
-                      ) : (
-                        <span className="opacity-50">normal</span>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                );
-              })
-            )}
-          </TableBody>
-          {qRows.length > 0 ? (
-            <TableBody>
-              <TableRow className="border-t-2 font-medium">
-                <TableCell>Total</TableCell>
-                <TableCell />
-                <TableCell className="text-right tabular-nums">
-                  {tk(totals.input)}
-                </TableCell>
-                <TableCell className="text-right tabular-nums">
-                  {tk(totals.output)}
-                </TableCell>
-                <TableCell className="text-right tabular-nums">
-                  {usd(totals.cost)}
-                </TableCell>
-                <TableCell />
-              </TableRow>
-            </TableBody>
-          ) : null}
-        </Table>
-      </div>
+      <QuestionsTable
+        rows={rows}
+        totals={{
+          input: totals.input,
+          output: totals.output,
+          cost: totals.cost,
+        }}
+      />
     </div>
   );
 }
