@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { createServiceClient } from "@/lib/supabase/service";
 import {
   Table,
@@ -9,6 +8,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { GEMINI_CACHE_STORAGE_PER_1M_PER_HOUR } from "@/lib/llm/config";
+import {
+  ConversationsTable,
+  type ConversationRow,
+} from "./conversations-table";
 
 export const dynamic = "force-dynamic";
 
@@ -101,18 +104,55 @@ export default async function CostsOverviewPage() {
   const geminiStorageMonthly =
     (3500 / 1_000_000) * 720 * GEMINI_CACHE_STORAGE_PER_1M_PER_HOUR;
 
-  // Conversation titles for the list (the view has no title).
+  // Conversation titles + owner for the list (the view has neither).
   const ids = convRows.map((c) => c.conversation_id);
   const titleById = new Map<string, string | null>();
+  const userIdById = new Map<string, string | null>();
+  const userLabelById = new Map<string, string>();
   if (ids.length > 0) {
     const { data: convos } = await service
       .from("conversations")
-      .select("id, title")
+      .select("id, title, user_id")
       .in("id", ids);
-    for (const c of (convos ?? []) as { id: string; title: string | null }[]) {
+    const userIds = new Set<string>();
+    for (const c of (convos ?? []) as {
+      id: string;
+      title: string | null;
+      user_id: string | null;
+    }[]) {
       titleById.set(c.id, c.title);
+      userIdById.set(c.id, c.user_id);
+      if (c.user_id) userIds.add(c.user_id);
+    }
+    if (userIds.size > 0) {
+      const { data: profs } = await service
+        .from("profiles")
+        .select("id, full_name, email")
+        .in("id", [...userIds]);
+      const labelByUser = new Map<string, string>();
+      for (const p of (profs ?? []) as {
+        id: string;
+        full_name: string | null;
+        email: string | null;
+      }[]) {
+        labelByUser.set(p.id, p.full_name || p.email || "—");
+      }
+      for (const [convId, uid] of userIdById.entries()) {
+        userLabelById.set(convId, (uid && labelByUser.get(uid)) || "—");
+      }
     }
   }
+
+  const convDisplay: ConversationRow[] = convRows.map((c) => ({
+    conversation_id: c.conversation_id,
+    title: titleById.get(c.conversation_id) ?? null,
+    user_label: userLabelById.get(c.conversation_id) ?? "—",
+    question_count: n(c.question_count),
+    free_questions: n(c.free_questions),
+    total_tokens: n(c.total_tokens),
+    total_cost: n(c.total_cost),
+    last_at: c.last_at ?? null,
+  }));
 
   const modelList = [...byModel.entries()].sort((a, b) => b[1].cost - a[1].cost);
 
@@ -215,56 +255,7 @@ export default async function CostsOverviewPage() {
         <h2 className="text-sm font-semibold tracking-tight">
           Par conversation
         </h2>
-        <div className="overflow-hidden rounded-lg border border-border bg-background">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Conversation</TableHead>
-                <TableHead className="text-right">Questions</TableHead>
-                <TableHead className="text-right">Gratuites</TableHead>
-                <TableHead className="text-right">Tokens</TableHead>
-                <TableHead className="text-right">Coût</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {convRows.length === 0 ? (
-                <TableRow>
-                  <TableCell
-                    colSpan={5}
-                    className="py-8 text-center text-sm text-muted-foreground"
-                  >
-                    Aucune conversation suivie pour l&apos;instant.
-                  </TableCell>
-                </TableRow>
-              ) : (
-                convRows.map((c) => (
-                  <TableRow key={c.conversation_id}>
-                    <TableCell className="max-w-xs">
-                      <Link
-                        href={`/admin/costs/${c.conversation_id}`}
-                        className="truncate font-medium hover:underline"
-                      >
-                        {titleById.get(c.conversation_id) ?? "Sans titre"}
-                      </Link>
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {n(c.question_count).toLocaleString("fr-FR")}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums text-muted-foreground">
-                      {n(c.free_questions).toLocaleString("fr-FR")}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {tokens(n(c.total_tokens))}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {usd(n(c.total_cost))}
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </div>
+        <ConversationsTable rows={convDisplay} />
       </section>
     </div>
   );
