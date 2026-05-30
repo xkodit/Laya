@@ -1,6 +1,7 @@
 "use client";
 
-import { FileText, Info } from "lucide-react";
+import { useEffect, useState } from "react";
+import { FileText, Info, Loader2 } from "lucide-react";
 import {
   Sheet,
   SheetContent,
@@ -85,6 +86,51 @@ export function CitedDocPanel({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  // Fetch the FULL article (all chunks for the same document_id + article_ref)
+  // when the panel opens. The chat persists only the chunks Voyage rerank
+  // surfaced — usually a single chunk per article — but the article-aware
+  // chunker splits articles >1500 chars into multiple pieces, so a cited
+  // article may only be partially visible from the persisted chunk alone.
+  // The API joins all parts in chunk_index order so the reader can verify the
+  // cited claim against the whole article. Falls back to the persisted chunk
+  // content on any fetch failure so the panel never goes empty.
+  const [fullContent, setFullContent] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [partCount, setPartCount] = useState<number>(1);
+
+  useEffect(() => {
+    if (!open || !chunk) {
+      setFullContent(null);
+      setPartCount(1);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    const params = new URLSearchParams();
+    if (chunk.id) params.set("chunkId", chunk.id);
+    if (chunk.article) params.set("article", chunk.article);
+    fetch(`/api/citation/article?${params.toString()}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { content?: string; chunkCount?: number } | null) => {
+        if (cancelled) return;
+        if (data?.content) {
+          setFullContent(data.content);
+          setPartCount(data.chunkCount ?? 1);
+        }
+      })
+      .catch(() => {
+        // Silent fallback — the chunk's own content is still rendered below.
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, chunk]);
+
+  const displayContent = fullContent ?? chunk?.content ?? "";
+
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
@@ -109,13 +155,24 @@ export function CitedDocPanel({
               {chunk.section}
             </SheetDescription>
           ) : null}
+          {partCount > 1 ? (
+            <p className="text-[11px] text-muted-foreground">
+              Article complet ({partCount} sections)
+            </p>
+          ) : null}
         </SheetHeader>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
+          {loading && !fullContent ? (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Loader2 className="size-3.5 animate-spin" />
+              Chargement de l&apos;article complet…
+            </div>
+          ) : null}
           {chunk ? (
             <div className="border-l-2 border-brand-gold/70 bg-brand-gold/5 px-4 py-3">
               <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">
-                {chunk.content}
+                {displayContent}
               </p>
             </div>
           ) : null}
