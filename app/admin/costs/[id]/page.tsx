@@ -84,11 +84,16 @@ export default async function CostDrilldownPage({
     if (m.question_id) questionText.set(m.question_id, m.content);
   }
 
+  // Entrée = all input-billed tokens (non-cached + cache read + cache write),
+  // derived as total - output so it reconciles by construction with the
+  // header total and with each row's total_tokens.
   const totals = qRows.reduce(
     (acc, r) => {
-      acc.input += n(r.input_tokens);
-      acc.output += n(r.output_tokens);
-      acc.total += n(r.total_tokens);
+      const total = n(r.total_tokens);
+      const output = n(r.output_tokens);
+      acc.input += total - output;
+      acc.output += output;
+      acc.total += total;
       acc.cost += n(r.total_cost);
       return acc;
     },
@@ -158,7 +163,7 @@ export default async function CostDrilldownPage({
                       {model}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
-                      {tk(n(r.input_tokens) + n(r.cache_read_tokens))}
+                      {tk(n(r.total_tokens) - n(r.output_tokens))}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
                       {tk(n(r.output_tokens))}
